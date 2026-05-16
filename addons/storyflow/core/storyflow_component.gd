@@ -774,7 +774,9 @@ func _process_node(node: Dictionary) -> void:
 		var handler: Callable = _node_handlers[node_type]
 		handler.call(node)
 	else:
-		# Unknown node type - try to follow default output
+		# Unknown node type - log and follow default output so newer scripts
+		# do not freeze on plugin versions that predate the node type.
+		push_warning("StoryFlow: Unsupported node type '%s' at node %s, skipping" % [node.get("type_string", ""), node.get("id", "")])
 		_process_next_node(StoryFlowHandles.source(node.get("id", "")))
 
 	_context.processing_depth -= 1
