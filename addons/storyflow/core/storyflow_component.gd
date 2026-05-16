@@ -48,6 +48,7 @@ signal dialogue_started()
 signal dialogue_updated(state: StoryFlowDialogueState)
 signal dialogue_ended()
 signal variable_changed(info: StoryFlowVariableChangeInfo)
+signal character_variable_changed(character_path: String, variable_name: String, value: StoryFlowVariant)
 signal script_started(script_path_name: String)
 signal script_ended(script_path_name: String)
 signal error_occurred(message: String)
@@ -463,6 +464,13 @@ func set_enum_variable(variable_name: String, value: String) -> void:
 # Character Variable Access
 # =============================================================================
 
+## Read a variable that lives on a character.
+##
+## Built-in fields are handled symmetrically:
+##   "Name"  → returns the localized display name (string-table key resolved).
+##   "Image" → returns the current portrait asset key.
+## Any other name resolves through the character's custom variables map.
+## Returns an empty StoryFlowVariant if the character or variable is missing.
 func get_character_variable(character_path: String, variable_name: String) -> StoryFlowVariant:
 	var mgr := get_manager()
 	if not mgr:
@@ -471,9 +479,13 @@ func get_character_variable(character_path: String, variable_name: String) -> St
 	if not character:
 		return StoryFlowVariant.new()
 
-	# Handle built-in "Name" field (stored as string table key — resolve it)
+	# Handle built-in "Name" field (stored as string-table key, resolve it)
 	if variable_name.to_lower() == "name":
 		return StoryFlowVariant.from_string(_resolve_string(character.character_name))
+
+	# Handle built-in "Image" field (current portrait asset key)
+	if variable_name.to_lower() == "image":
+		return StoryFlowVariant.from_string(character.image_key)
 
 	var v: Dictionary = character.variables.get(variable_name, {})
 	var val = v.get("value", null)
@@ -490,6 +502,88 @@ func set_character_variable(character_path: String, variable_name: String, value
 	if not character or not character.variables.has(variable_name):
 		return
 	character.variables[variable_name]["value"] = value
+
+
+## Return the live runtime character object for a path.
+## Useful when you want to read several fields without separate variable calls.
+## Returns null if no character is registered at that path.
+func get_character(character_path: String) -> StoryFlowCharacter:
+	var mgr := get_manager()
+	if not mgr:
+		return null
+	return mgr.get_runtime_character(character_path)
+
+
+## Return the names of all custom variables defined on a character.
+## Does not include the built-in "Name" and "Image" fields, which are always
+## available via [method get_character_variable] regardless of declaration.
+func get_character_variables(character_path: String) -> Array[String]:
+	var out: Array[String] = []
+	var mgr := get_manager()
+	if not mgr:
+		return out
+	var character: StoryFlowCharacter = mgr.get_runtime_character(character_path)
+	if not character:
+		return out
+	for var_name in character.variables:
+		out.append(str(var_name))
+	return out
+
+
+## Resolve a character's portrait to a Texture2D.
+## When [param asset_key] is empty (default), uses the character's current
+## image_key, which reflects any runtime mutations from setCharacterVar("Image", ...).
+## Pass a non-empty asset_key to resolve an alternate pose, e.g. one stored in a
+## custom image-typed character variable.
+## Walks the standard three asset pools in priority order: character → script → project.
+## Returns null if nothing resolves.
+func get_character_portrait(character_path: String, asset_key: String = "") -> Texture2D:
+	var mgr := get_manager()
+	if not mgr:
+		return null
+	var character: StoryFlowCharacter = mgr.get_runtime_character(character_path)
+	if not character:
+		return null
+	var key := asset_key if not asset_key.is_empty() else character.image_key
+	if key.is_empty():
+		return null
+	return _resolve_image_asset(key, mgr.get_project(), character)
+
+
+# =============================================================================
+# Array Variable Access
+# =============================================================================
+
+## Read a script or global variable of type character-array.
+##
+## Returns the array of character paths stored in the variable. Each path is
+## suitable for [method get_character], [method get_character_variable], or
+## [method get_character_portrait]. Returns an empty array if the variable is
+## missing or is not a character array.
+##
+## Note: this reads a *script variable whose element type is character*, which
+## is distinct from [method get_character_variable], which reads a variable
+## that lives *on* a character.
+func get_character_array_variable(variable_name: String) -> Array[String]:
+	var out: Array[String] = []
+	var result := _find_variable_by_display_name(variable_name)
+	if result.is_empty():
+		return out
+	var v: Dictionary = result["variable"]
+	if not v.get("is_array", false):
+		push_warning("StoryFlow: Variable '%s' is not an array" % variable_name)
+		return out
+	if v.get("type", -1) != StoryFlowTypes.VariableType.CHARACTER:
+		push_warning("StoryFlow: Variable '%s' is not a character array" % variable_name)
+		return out
+	var val = v.get("value", null)
+	if not (val is StoryFlowVariant):
+		return out
+	var arr: Array = val.get_array()
+	for elem in arr:
+		if elem is StoryFlowVariant:
+			out.append(elem.get_string(""))
+	return out
 
 # =============================================================================
 # Utility Functions
@@ -1892,18 +1986,25 @@ func _handle_set_character_var(node: Dictionary) -> void:
 
 	# Set the character variable via the manager
 	var mgr := get_manager()
+	var mutated := false
 	if mgr:
 		var character: StoryFlowCharacter = mgr.get_runtime_character(character_path)
 		if character:
 			# Handle built-in "Name" field
 			if variable_name.to_lower() == "name":
 				character.character_name = new_value.get_string("")
+				mutated = true
 			# Handle built-in "Image" field
 			elif variable_name.to_lower() == "image":
 				character.image_key = new_value.get_string("")
+				mutated = true
 			# Custom variable
 			elif character.variables.has(variable_name):
 				character.variables[variable_name]["value"] = new_value
+				mutated = true
+
+	if mutated:
+		character_variable_changed.emit(character_path, variable_name, new_value)
 
 	_handle_set_node_end(node, StoryFlowHandles.source(node["id"], StoryFlowHandles.OUT_FLOW))
 
