@@ -435,7 +435,7 @@ func get_string_variable(variable_name: String) -> String:
 	var v: Dictionary = result["variable"]
 	var val = v.get("value", null)
 	if val is StoryFlowVariant:
-		return val.get_string()
+		return _resolve_string(val.get_string())
 	return ""
 
 
@@ -583,6 +583,39 @@ func get_character_array_variable(variable_name: String) -> Array[String]:
 	for elem in arr:
 		if elem is StoryFlowVariant:
 			out.append(elem.get_string(""))
+	return out
+
+
+## Read any array variable by display name.
+##
+## Returns the elements as StoryFlowVariant copies so callers can use the typed
+## getters (get_bool, get_int, get_float, get_string). String and enum element
+## values are routed through the string table, so callers receive localized
+## text rather than raw keys. Image, audio, and character elements are stored
+## as plain strings (asset keys / paths) so they pass through unchanged.
+## Returns an empty array if the variable is missing or is not an array.
+func get_array_variable(variable_name: String) -> Array[StoryFlowVariant]:
+	var out: Array[StoryFlowVariant] = []
+	var result := _find_variable_by_display_name(variable_name)
+	if result.is_empty():
+		return out
+	var v: Dictionary = result["variable"]
+	if not v.get("is_array", false):
+		push_warning("StoryFlow: Variable '%s' is not an array" % variable_name)
+		return out
+	var val = v.get("value", null)
+	if not (val is StoryFlowVariant):
+		return out
+	var arr: Array = val.get_array()
+	for elem in arr:
+		if not (elem is StoryFlowVariant):
+			continue
+		var copy: StoryFlowVariant = elem.duplicate_variant()
+		if copy.type == StoryFlowTypes.VariableType.STRING:
+			copy.set_string(_resolve_string(copy.get_string("")))
+		elif copy.type == StoryFlowTypes.VariableType.ENUM:
+			copy.set_enum(_resolve_string(copy.get_string("")))
+		out.append(copy)
 	return out
 
 # =============================================================================
