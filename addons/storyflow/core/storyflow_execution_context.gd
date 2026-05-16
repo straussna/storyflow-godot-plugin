@@ -84,6 +84,14 @@ var node_runtime_states: Dictionary = {}  # String → StoryFlowNodeRuntimeState
 var input_option_values: Dictionary = {}
 
 # =============================================================================
+# Unknown Node Warning Dedup
+# =============================================================================
+
+## Set of node ids already warned about (forward-compat unsupported types).
+## Resets on reset() so warnings can fire again on a new dialogue run.
+var warned_unknown_nodes: Dictionary = {}
+
+# =============================================================================
 # Methods
 # =============================================================================
 
@@ -147,3 +155,4 @@ func reset() -> void:
 	processing_depth = 0
 	node_runtime_states.clear()
 	input_option_values.clear()
+	warned_unknown_nodes.clear()

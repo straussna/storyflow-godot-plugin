@@ -89,6 +89,9 @@ func evaluate_boolean_from_node(node_id: String, source_handle: String = "") -> 
 	var node_type: StoryFlowTypes.NodeType = node.get("type", StoryFlowTypes.NodeType.UNKNOWN)
 	var data: Dictionary = node.get("data", {})
 
+	if node_type == StoryFlowTypes.NodeType.UNKNOWN:
+		_warn_unknown_evaluator_source(node)
+
 	match node_type:
 		StoryFlowTypes.NodeType.GET_BOOL:
 			var variable := _find_variable(data)
@@ -284,6 +287,9 @@ func evaluate_integer_from_node(node_id: String, source_handle: String = "") -> 
 
 	var node_type: StoryFlowTypes.NodeType = node.get("type", StoryFlowTypes.NodeType.UNKNOWN)
 	var data: Dictionary = node.get("data", {})
+
+	if node_type == StoryFlowTypes.NodeType.UNKNOWN:
+		_warn_unknown_evaluator_source(node)
 
 	match node_type:
 		StoryFlowTypes.NodeType.GET_INT:
@@ -509,6 +515,9 @@ func evaluate_float_from_node(node_id: String, source_handle: String = "") -> fl
 	var node_type: StoryFlowTypes.NodeType = node.get("type", StoryFlowTypes.NodeType.UNKNOWN)
 	var data: Dictionary = node.get("data", {})
 
+	if node_type == StoryFlowTypes.NodeType.UNKNOWN:
+		_warn_unknown_evaluator_source(node)
+
 	match node_type:
 		StoryFlowTypes.NodeType.GET_FLOAT:
 			var variable := _find_variable(data)
@@ -629,6 +638,9 @@ func evaluate_string_from_node(node_id: String, source_handle: String = "") -> S
 
 	var node_type: StoryFlowTypes.NodeType = node.get("type", StoryFlowTypes.NodeType.UNKNOWN)
 	var data: Dictionary = node.get("data", {})
+
+	if node_type == StoryFlowTypes.NodeType.UNKNOWN:
+		_warn_unknown_evaluator_source(node)
 
 	match node_type:
 		StoryFlowTypes.NodeType.GET_STRING:
@@ -790,6 +802,9 @@ func evaluate_enum_from_node(node_id: String, source_handle: String = "") -> Str
 	var node_type: StoryFlowTypes.NodeType = node.get("type", StoryFlowTypes.NodeType.UNKNOWN)
 	var data: Dictionary = node.get("data", {})
 
+	if node_type == StoryFlowTypes.NodeType.UNKNOWN:
+		_warn_unknown_evaluator_source(node)
+
 	match node_type:
 		StoryFlowTypes.NodeType.GET_ENUM:
 			var variable := _find_variable(data)
@@ -880,6 +895,9 @@ func _evaluate_array_input_generic(node_id: String, handle_suffix: String, expec
 
 	var source_type: StoryFlowTypes.NodeType = source_node.get("type", StoryFlowTypes.NodeType.UNKNOWN)
 	var source_data: Dictionary = source_node.get("data", {})
+
+	if source_type == StoryFlowTypes.NodeType.UNKNOWN:
+		_warn_unknown_evaluator_source(source_node)
 
 	# Handle getCharacterVar nodes that can return arrays
 	if source_type == StoryFlowTypes.NodeType.GET_CHARACTER_VAR:
@@ -1284,3 +1302,22 @@ func _get_localized_data_string(data: Dictionary, key: String) -> String:
 	if val.is_empty():
 		return ""
 	return _resolve_string_key(val)
+
+
+# =============================================================================
+# Unknown Node Warning (Private)
+# =============================================================================
+
+## Emit a forward-compat warning when an evaluator follows an input edge to a
+## node whose type is UNKNOWN (i.e. the plugin does not recognize it). Dedups
+## per-execution-context so each unknown source node warns at most once per
+## dialogue run. Callers fall through to their existing default-return path;
+## this helper does not change return semantics.
+func _warn_unknown_evaluator_source(node: Dictionary) -> void:
+	if not _context:
+		return
+	var id: String = node.get("id", "")
+	if _context.warned_unknown_nodes.has(id):
+		return
+	_context.warned_unknown_nodes[id] = true
+	push_warning("StoryFlow: Unsupported node type '%s' at node %s, returning default value" % [node.get("type_string", ""), id])
