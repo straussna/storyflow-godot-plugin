@@ -203,6 +203,19 @@ enum NodeType {
 	GET_CHARACTER_VAR,
 	SET_CHARACTER_VAR,
 
+	# Map Variables
+	GET_MAP,
+	SET_MAP,
+	GET_MAP_VALUE,
+	SET_MAP_VALUE,
+	HAS_MAP_KEY,
+	MAP_SIZE,
+	MAP_KEYS,
+	MAP_VALUES,
+	REMOVE_MAP_KEY,
+	CLEAR_MAP,
+	FOR_EACH_MAP,
+
 	UNKNOWN,
 }
 
@@ -216,6 +229,7 @@ enum VariableType {
 	IMAGE,
 	AUDIO,
 	CHARACTER,
+	MAP,
 }
 
 enum AssetType {
@@ -429,6 +443,19 @@ static var _node_type_map: Dictionary = {
 	# Character Variables
 	"getCharacterVar": NodeType.GET_CHARACTER_VAR,
 	"setCharacterVar": NodeType.SET_CHARACTER_VAR,
+
+	# Map Variables
+	"getMap": NodeType.GET_MAP,
+	"setMap": NodeType.SET_MAP,
+	"getMapValue": NodeType.GET_MAP_VALUE,
+	"setMapValue": NodeType.SET_MAP_VALUE,
+	"hasMapKey": NodeType.HAS_MAP_KEY,
+	"mapSize": NodeType.MAP_SIZE,
+	"mapKeys": NodeType.MAP_KEYS,
+	"mapValues": NodeType.MAP_VALUES,
+	"removeMapKey": NodeType.REMOVE_MAP_KEY,
+	"clearMap": NodeType.CLEAR_MAP,
+	"forEachMap": NodeType.FOR_EACH_MAP,
 }
 
 
@@ -449,6 +476,7 @@ static var _variable_type_map: Dictionary = {
 	"image": VariableType.IMAGE,
 	"audio": VariableType.AUDIO,
 	"character": VariableType.CHARACTER,
+	"map": VariableType.MAP,
 }
 
 
@@ -486,6 +514,8 @@ static var _set_node_types: Array[NodeType] = [
 	NodeType.SET_CHARACTER_VAR,
 	NodeType.SET_BACKGROUND_IMAGE,
 	NodeType.PLAY_AUDIO,
+	NodeType.SET_MAP, NodeType.SET_MAP_VALUE,
+	NodeType.REMOVE_MAP_KEY, NodeType.CLEAR_MAP,
 ]
 
 
@@ -549,6 +579,9 @@ static var _logic_node_types: Array[NodeType] = [
 	NodeType.FIND_IN_FLOAT_ARRAY, NodeType.FIND_IN_STRING_ARRAY,
 	NodeType.FIND_IN_IMAGE_ARRAY, NodeType.FIND_IN_CHARACTER_ARRAY,
 	NodeType.FIND_IN_AUDIO_ARRAY,
+	# Map read-only operations
+	NodeType.GET_MAP, NodeType.GET_MAP_VALUE, NodeType.HAS_MAP_KEY,
+	NodeType.MAP_SIZE, NodeType.MAP_KEYS, NodeType.MAP_VALUES,
 ]
 
 
@@ -565,6 +598,10 @@ static var _for_each_loop_types: Array[NodeType] = [
 	NodeType.FOR_EACH_FLOAT_LOOP, NodeType.FOR_EACH_STRING_LOOP,
 	NodeType.FOR_EACH_IMAGE_LOOP, NodeType.FOR_EACH_CHARACTER_LOOP,
 	NodeType.FOR_EACH_AUDIO_LOOP,
+	# forEachMap iterates {key, value} entries instead of array elements, so it
+	# gets its own execution handler (mirroring the Unreal dispatch) — but it is
+	# still a for-each loop for loop-stack/continuation purposes.
+	NodeType.FOR_EACH_MAP,
 ]
 
 

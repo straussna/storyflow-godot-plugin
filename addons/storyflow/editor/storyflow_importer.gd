@@ -553,6 +553,25 @@ func _parse_node_data(type_string: String, node_obj: Dictionary) -> Dictionary:
 	if data_src.has("isArray"):
 		data["isArray"] = data_src["isArray"]
 
+	# -- Map fields (per-variable map nodes and catalog op nodes) -----------
+	if data_src.has("keyType"):
+		data["keyType"] = data_src["keyType"]
+	if data_src.has("valueType"):
+		data["valueType"] = data_src["valueType"]
+		# Re-parse the inline "value" fallback with the declared valueType so
+		# float and enum values keep their type (the generic parse above has no
+		# hint). String values store the exported strings-table key verbatim —
+		# resolution happens at read time, exactly like scalar variables.
+		if data_src.has("value"):
+			data["value"] = _parse_variant(data_src["value"], str(data_src["valueType"]))
+	# Inline key fallback for catalog op nodes (used when the key input handle
+	# is unwired). Inline keys are always raw — never strings-table keys. The
+	# coercion is keyed off the DECLARED keyType, not the JSON value's type, so
+	# node-inline keys and variable entry keys (_parse_map_entries) share one
+	# strategy and numeric-string keys can't diverge.
+	if data_src.has("key"):
+		data["key"] = _coerce_map_key(data_src["key"], str(data_src.get("keyType", "")))
+
 	return data
 
 
@@ -587,9 +606,40 @@ func _parse_single_variable(var_id: String, var_obj: Dictionary) -> Dictionary:
 	var type_string: String = var_obj.get("type", "")
 	var var_type: StoryFlowTypes.VariableType = StoryFlowTypes.parse_variable_type(type_string)
 
+	# Map key/value types and their enum values (parsed before the value —
+	# entry parsing depends on them)
+	var key_type_string: String = ""
+	var value_type_string: String = ""
+	var key_enum_values: Array = []
+	var value_enum_values: Array = []
+	if var_type == StoryFlowTypes.VariableType.MAP:
+		key_type_string = str(var_obj.get("keyType", "string"))
+		value_type_string = str(var_obj.get("valueType", "string"))
+		if var_obj.has("keyEnumValues"):
+			for ev in var_obj["keyEnumValues"]:
+				key_enum_values.append(str(ev))
+		if var_obj.has("valueEnumValues"):
+			for ev in var_obj["valueEnumValues"]:
+				value_enum_values.append(str(ev))
+
 	var value: StoryFlowVariant = StoryFlowVariant.new()
+	if var_type == StoryFlowTypes.VariableType.MAP:
+		# Map variables always hold a map variant — absent map data means an
+		# empty map, never an untyped variant
+		value = StoryFlowVariant.from_map({})
 	if var_obj.has("value"):
-		value = _parse_variant(var_obj["value"], type_string)
+		if var_type == StoryFlowTypes.VariableType.MAP:
+			# Map values are an ordered array of {key, value} entry objects,
+			# not a scalar variant
+			var entries_raw = var_obj["value"]
+			var context: String = var_obj.get("name", "")
+			if context.is_empty():
+				context = var_id
+			value = StoryFlowVariant.from_map(_parse_map_entries(
+				entries_raw if entries_raw is Array else [],
+				key_type_string, value_type_string, context))
+		else:
+			value = _parse_variant(var_obj["value"], type_string)
 
 	var enum_values: Array = []
 	if var_obj.has("enumValues"):
@@ -603,6 +653,10 @@ func _parse_single_variable(var_id: String, var_obj: Dictionary) -> Dictionary:
 		"value": value,
 		"is_array": var_obj.get("isArray", false),
 		"enum_values": enum_values,
+		"key_type": StoryFlowTypes.parse_variable_type(key_type_string),
+		"value_type": StoryFlowTypes.parse_variable_type(value_type_string),
+		"key_enum_values": key_enum_values,
+		"value_enum_values": value_enum_values,
 		"is_input": var_obj.get("isInput", false),
 		"is_output": var_obj.get("isOutput", false),
 	}
@@ -619,15 +673,77 @@ func _parse_character_variables(raw: Dictionary) -> Dictionary:
 		var var_name: String = var_obj.get("name", var_key)
 		var type_string: String = var_obj.get("type", "")
 		var var_type: StoryFlowTypes.VariableType = StoryFlowTypes.parse_variable_type(type_string)
+		var key_type_string: String = ""
+		var value_type_string: String = ""
+		var key_enum_values: Array = []
+		var value_enum_values: Array = []
 		var value: StoryFlowVariant = StoryFlowVariant.new()
-		if var_obj.has("value"):
+		if var_type == StoryFlowTypes.VariableType.MAP:
+			key_type_string = str(var_obj.get("keyType", "string"))
+			value_type_string = str(var_obj.get("valueType", "string"))
+			if var_obj.has("keyEnumValues"):
+				for ev in var_obj["keyEnumValues"]:
+					key_enum_values.append(str(ev))
+			if var_obj.has("valueEnumValues"):
+				for ev in var_obj["valueEnumValues"]:
+					value_enum_values.append(str(ev))
+			# Map values are an ordered array of {key, value} entry objects;
+			# absent map data means an empty map, never an untyped variant
+			var entries_raw = var_obj.get("value")
+			value = StoryFlowVariant.from_map(_parse_map_entries(
+				entries_raw if entries_raw is Array else [],
+				key_type_string, value_type_string, var_name))
+		elif var_obj.has("value"):
 			value = _parse_variant(var_obj["value"], type_string)
 		result[var_name] = {
 			"name": var_name,
 			"type": var_type,
 			"value": value,
+			"key_type": StoryFlowTypes.parse_variable_type(key_type_string),
+			"value_type": StoryFlowTypes.parse_variable_type(value_type_string),
+			"key_enum_values": key_enum_values,
+			"value_enum_values": value_enum_values,
 		}
 	return result
+
+
+# =============================================================================
+# Map Entry Parsing
+# =============================================================================
+
+## Coerce a raw JSON map key to its storage type from the DECLARED keyType.
+## Integer keys arrive as JSON numbers (parsed as float by Godot) and are
+## coerced to int so map lookups compare numerically; string/enum keys are
+## stored as String. Keys are raw values — never strings-table keys. This is
+## the single coercion strategy shared by node-inline keys (_parse_node_data)
+## and variable entry keys (_parse_map_entries).
+func _coerce_map_key(raw_key, key_type_string: String):
+	if key_type_string == "integer":
+		return int(raw_key)
+	return str(raw_key)
+
+
+## Parse map entries from the exported ordered array of {key, value} objects.
+## Returns an insertion-ordered Dictionary: coerced key -> StoryFlowVariant.
+## Entry order is contractual — it is observable through mapKeys/mapValues/
+## forEachMap and must match the editor's serialized order (Godot Dictionaries
+## preserve insertion order).
+func _parse_map_entries(entries_raw: Array, key_type_string: String, value_type_string: String, variable_context: String) -> Dictionary:
+	var entries: Dictionary = {}
+	for entry_obj in entries_raw:
+		if not entry_obj is Dictionary:
+			continue
+		# Keys are raw values (numbers for integer keys, strings otherwise) and
+		# never resolve through the strings table or asset map. An entry without
+		# a key is unaddressable — skip it.
+		if not entry_obj.has("key") or entry_obj["key"] == null:
+			push_warning("StoryFlow: Skipping map entry with missing key in map variable '%s'" % variable_context)
+			continue
+		var key = _coerce_map_key(entry_obj["key"], key_type_string)
+		# String-family values store the exported strings-table key / asset id
+		# verbatim; resolution happens at read time, exactly like scalar variables
+		entries[key] = _parse_variant(entry_obj.get("value"), value_type_string)
+	return entries
 
 
 # =============================================================================
