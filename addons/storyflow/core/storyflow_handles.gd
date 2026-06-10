@@ -82,6 +82,10 @@ const IN_CHARACTER_INPUT := "character-character-input"
 static var _data_type_suffixes: Array[String] = [
 	"boolean-", "integer-", "float-", "string-", "enum-",
 	"image-", "character-", "audio-",
+	# Map handles ("source-{id}-map-{keyType}-{valueType}") already match the
+	# entries above through their embedded K/V type names, but classify them
+	# explicitly so the rule does not depend on which types a map carries.
+	"map-",
 ]
 
 
@@ -111,6 +115,23 @@ static func get_data_type_from_suffix(suffix: String) -> StoryFlowTypes.Variable
 	elif suffix.begins_with("audio"):
 		return StoryFlowTypes.VariableType.AUDIO
 	return StoryFlowTypes.VariableType.NONE
+
+
+# =============================================================================
+# Map Handles
+# =============================================================================
+# Map handles bake the key/value types into the handle ID itself:
+#   Source: "source-{nodeId}-map-{keyType}-{valueType}"             (no optionId)
+#   Target: "target-{nodeId}-map-{keyType}-{valueType}-{optionId}"
+# Target optionIds: "1" (pure map reads: getMapValue/hasMapKey/mapSize/
+# mapKeys/mapValues), "2" (setMap + mutators: setMapValue/removeMapKey/
+# clearMap), "map" (forEachMap), "input" (setCharacterVar's map input)
+# — optionIds are NOT always digits.
+
+
+## Build a map input handle suffix: "map-{key_type}-{value_type}-{option_id}".
+static func in_map(key_type: String, value_type: String, option_id: String) -> String:
+	return "map-%s-%s-%s" % [key_type, value_type, option_id]
 
 
 # =============================================================================

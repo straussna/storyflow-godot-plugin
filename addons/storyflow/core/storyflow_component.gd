@@ -779,6 +779,20 @@ func _build_dispatch_table() -> void:
 	_node_handlers[NT.GET_CHARACTER_VAR] = logic_handler
 	_node_handlers[NT.SET_CHARACTER_VAR] = _handle_set_character_var
 
+	# Map variable handlers
+	_node_handlers[NT.SET_MAP] = _handle_set_map
+	var map_modify_handler := _handle_map_modify
+	for t in [NT.SET_MAP_VALUE, NT.REMOVE_MAP_KEY, NT.CLEAR_MAP]:
+		_node_handlers[t] = map_modify_handler
+
+	# Map pure reads (evaluated lazily on data pull; handler only routes exec)
+	var map_pure_handler := _handle_map_pure_node
+	for t in [NT.GET_MAP, NT.GET_MAP_VALUE, NT.HAS_MAP_KEY, NT.MAP_SIZE, NT.MAP_KEYS, NT.MAP_VALUES]:
+		_node_handlers[t] = map_pure_handler
+
+	# Map entry iteration (snapshot-at-init semantics — see _handle_for_each_map)
+	_node_handlers[NT.FOR_EACH_MAP] = _handle_for_each_map
+
 # =============================================================================
 # Core Processing
 # =============================================================================
@@ -1103,12 +1117,18 @@ func _handle_run_script(node: Dictionary) -> void:
 						_evaluator.evaluate_string_input(node.get("id", ""), handle_suffix, "")
 					)
 
-	# Push current state
+	# Push current state. saved_variables intentionally SHARES the live local
+	# records (the HTML runtime's call frames save gameState.variables.slice(),
+	# i.e. live variable references): map aliasing established before a
+	# runScript call must survive the call and restore — a deep copy here would
+	# detach aliased map storage. The called script REASSIGNS
+	# _context.local_variables below, so the saved Dictionary is never mutated
+	# during the call.
 	var call_frame := StoryFlowCallFrame.new()
 	call_frame.script_path = _context.current_script.script_path if _context.current_script else ""
 	call_frame.return_node_id = node["id"]
 	call_frame.script_asset = _context.current_script
-	call_frame.saved_variables = StoryFlowVariant.deep_copy_variables(_context.local_variables)
+	call_frame.saved_variables = _context.local_variables
 	call_frame.saved_flow_stack = _context.flow_call_stack.duplicate()
 	_context.call_stack.push_back(call_frame)
 
@@ -1836,6 +1856,244 @@ func _continue_for_each_loop(node_id: String) -> void:
 	_process_node(loop_node)
 
 # =============================================================================
+# Node Handlers - Map Variables
+# =============================================================================
+
+func _handle_set_map(node: Dictionary) -> void:
+	# Mirrors the HTML runtime's setMap → updateMapVariable: resolve the wired
+	# map input ("2") and ALIAS the bound variable's storage to the origin
+	# variable's live Dictionary — set_map() stores the REFERENCE, so after
+	# setMap(b ← chain from getMap(a)) a later clearMap(a) also empties b.
+	# Copy-on-set would break the cross-runtime aliasing pin.
+	var data: Dictionary = node.get("data", {})
+	var var_id: String = data.get("variable", "")
+	var is_global: bool = data.get("isGlobal", false)
+	var flow_handle := StoryFlowHandles.source(node["id"], StoryFlowHandles.OUT_FLOW)
+
+	var variable: Dictionary = _find_variable(var_id, is_global)
+	var val = variable.get("value", null)
+	if variable.is_empty() or variable.get("type", -1) != StoryFlowTypes.VariableType.MAP or not (val is StoryFlowVariant):
+		# HTML returns early without trace/dispatch but still continues exec
+		_handle_set_node_end(node, flow_handle)
+		return
+
+	var variant: StoryFlowVariant = val
+	var key_type: String = str(data.get("keyType", ""))
+	var value_type: String = str(data.get("valueType", ""))
+
+	# Missing K/V types: the map input handle cannot be built — behave as
+	# disconnected (keep the current value, still trace and dispatch).
+	if _evaluator and not key_type.is_empty() and not value_type.is_empty():
+		var handle_suffix := StoryFlowHandles.in_map(key_type, value_type, "2")
+		var edge: Dictionary = _context.current_script.find_input_edge(node["id"], handle_suffix)
+		if not edge.is_empty():
+			var map_result: Dictionary = _evaluator.resolve_map_input(node, "2")
+			var kind: String = map_result.get("kind", "")
+			var source_map = map_result.get("map")
+			if source_map is Dictionary:
+				if kind == StoryFlowEvaluator.MAP_SOURCE_CHARACTER_VAR or kind == StoryFlowEvaluator.MAP_SOURCE_RUN_SCRIPT:
+					# Read-only-terminal chain (charvar or runScript output):
+					# HTML's setMap SNAPSHOTS the entries into a fresh Map —
+					# never aliases live charvar/runScript storage. Entry
+					# values are deep-duplicated to fully detach the copy.
+					variant.set_map(_snapshot_map_entries(source_map))
+				else:
+					# Wired and resolved: share the origin variable's live
+					# Dictionary. set_map stores the reference — this IS the alias.
+					variant.set_map(source_map)
+			else:
+				# Wired but unresolved: HTML assigns a fresh empty Map
+				variant.set_map({})
+		# No edge: keep the current value (maps have no inline fallback)
+
+	# Trace shape pinned by the cross-runtime fixture: size=, not value=
+	_sf_trace('VAR SET "%s" global=%s size=%d' % [variable.get("name", var_id), str(is_global).to_lower(), variant.get_map().size()])
+	_notify_variable_changed(variable, is_global)
+	_handle_set_node_end(node, flow_handle)
+
+
+func _handle_map_modify(node: Dictionary) -> void:
+	# setMapValue / removeMapKey / clearMap — one handler, three ops (mirrors
+	# the HTML runtime's map mutator handlers). Mutates the ORIGIN variable's
+	# live map Dictionary IN PLACE so every alias observes the change, then
+	# fires the variable's change notification the way the array write-back
+	# does. NOTE: HTML mutators emit NO "VAR SET" trace line — only setMap does
+	# (see the map-trace-fixture) — so none is emitted here.
+	var data: Dictionary = node.get("data", {})
+	var node_type: StoryFlowTypes.NodeType = node.get("type", StoryFlowTypes.NodeType.UNKNOWN)
+	var flow_handle := StoryFlowHandles.source(node["id"], StoryFlowHandles.OUT_FLOW)
+
+	# Missing K/V types: HTML skips the mutation but still continues exec
+	if not _evaluator or str(data.get("keyType", "")).is_empty() or str(data.get("valueType", "")).is_empty():
+		_handle_set_node_end(node, flow_handle)
+		return
+
+	# Resolve ALL non-map inputs FIRST, THEN the live map (mirrors the Unreal
+	# port's input-order rule and the HTML evaluation order): key (input "3"),
+	# and for setMapValue the typed value (input "4" with the inline fallback).
+	var key = null
+	if node_type != StoryFlowTypes.NodeType.CLEAR_MAP:
+		key = _evaluator.evaluate_map_op_key_input(node, "3")
+
+	var new_value: StoryFlowVariant = null
+	if node_type == StoryFlowTypes.NodeType.SET_MAP_VALUE:
+		new_value = _evaluator.evaluate_map_op_value_input(node, "4")
+
+	var map_result: Dictionary = _evaluator.resolve_map_input(node, "2")
+	var kind: String = map_result.get("kind", "")
+	var map = map_result.get("map")
+	if not (map is Dictionary):
+		# Unresolved map: HTML mutates a throwaway empty Map — no effect, no
+		# dispatch. Silent no-op is HTML parity; leave a verbose breadcrumb.
+		print_verbose("StoryFlow: Map mutator node %s could not resolve its map input - mutation skipped" % node.get("id", ""))
+		_handle_set_node_end(node, flow_handle)
+		return
+
+	if kind == StoryFlowEvaluator.MAP_SOURCE_CHARACTER_VAR or kind == StoryFlowEvaluator.MAP_SOURCE_RUN_SCRIPT:
+		# Read-only-terminal chain (charvar or runScript output): HTML hands the
+		# mutator a THROWAWAY fresh Map — the stored variable is observably
+		# unchanged and no variable-change dispatch fires. Skip mutation AND
+		# notify (observable no-op): use setCharacterVar to write charvars.
+		print_verbose("StoryFlow: Map mutator node %s resolves to a read-only map source (character variable or runScript output) - mutation skipped" % node.get("id", ""))
+		_handle_set_node_end(node, flow_handle)
+		return
+
+	match node_type:
+		StoryFlowTypes.NodeType.SET_MAP_VALUE:
+			# Godot Dictionaries keep an existing key's position on overwrite
+			# and append new keys — exactly JS Map insertion-order semantics.
+			map[key] = new_value
+		StoryFlowTypes.NodeType.REMOVE_MAP_KEY:
+			map.erase(key)
+		StoryFlowTypes.NodeType.CLEAR_MAP:
+			# In-place clear ON THE LIVE Dictionary — deliberate and contractual:
+			# aliases created by setMap must observe the wipe (the fixture pins
+			# clearMap(inv) emptying the aliased inv2). Do NOT reassign here.
+			map.clear()
+
+	var origin_variable: Dictionary = map_result.get("variable", {})
+	if not origin_variable.is_empty():
+		_notify_variable_changed(origin_variable, map_result.get("is_global", false))
+	_handle_set_node_end(node, flow_handle)
+
+
+func _handle_map_pure_node(node: Dictionary) -> void:
+	# Pure map reads are evaluated lazily on data pull (map reads are never
+	# memoized — see the evaluator). This handler only routes exec, mirroring
+	# the HTML handlers' continuation handles: getMapValue flows on via its
+	# typed value output; hasMapKey/mapSize via their typed data outputs.
+	# getMap (no exec ports — HTML registers no handler) and mapKeys/mapValues
+	# (HTML handlers end without processNextNode) dead-end deliberately.
+	var node_type: StoryFlowTypes.NodeType = node.get("type", StoryFlowTypes.NodeType.UNKNOWN)
+	var data: Dictionary = node.get("data", {})
+	match node_type:
+		StoryFlowTypes.NodeType.GET_MAP_VALUE:
+			var value_type: String = str(data.get("valueType", ""))
+			if value_type.is_empty():
+				value_type = "string"
+			_process_next_node(StoryFlowHandles.source(node["id"], "%s-value" % value_type))
+		StoryFlowTypes.NodeType.HAS_MAP_KEY:
+			_process_next_node(StoryFlowHandles.source(node["id"], StoryFlowHandles.OUT_BOOLEAN))
+		StoryFlowTypes.NodeType.MAP_SIZE:
+			_process_next_node(StoryFlowHandles.source(node["id"], StoryFlowHandles.OUT_INTEGER))
+		_:
+			pass
+
+
+func _handle_for_each_map(node: Dictionary) -> void:
+	# Mirrors the HTML runtime's processForEachMap: iterate map entries (key +
+	# value) in insertion order. Entries are SNAPSHOT once at loop init — body
+	# mutations (even removeMapKey of the current key) land on the live map but
+	# neither skip, repeat, nor extend iteration. _continue_for_each_loop
+	# re-enters here via the dispatch table (it reuses loop_index/
+	# loop_initialized).
+	var node_id: String = node["id"]
+	var data: Dictionary = node.get("data", {})
+
+	# Missing K/V types: the map input handle cannot be built — HTML follows
+	# "completed" immediately with zero iterations (and no LOOP trace).
+	if str(data.get("keyType", "")).is_empty() or str(data.get("valueType", "")).is_empty():
+		_process_next_node(StoryFlowHandles.source(node_id, StoryFlowHandles.OUT_LOOP_COMPLETED))
+		return
+
+	var node_state: StoryFlowNodeRuntimeState = _context.get_node_state(node_id)
+
+	# Initialize loop on first entry: resolve the live map (input "map") and
+	# snapshot its entries immediately into parallel key/value arrays. An
+	# empty or unresolved map yields zero iterations.
+	if not node_state.loop_initialized:
+		var keys: Array = []
+		var values: Array = []
+		if _evaluator:
+			var map_result: Dictionary = _evaluator.resolve_map_input(node, "map")
+			var map = map_result.get("map")
+			if map is Dictionary:
+				for k in map:
+					keys.append(k)
+					values.append(map[k])
+		node_state.loop_keys = keys
+		node_state.loop_values = values
+		node_state.loop_index = 0
+		node_state.loop_initialized = true
+
+	if node_state.loop_index < node_state.loop_keys.size():
+		# Clear evaluation caches from previous iteration so boolean chains
+		# re-evaluate. loop_key/loop_value live outside the cache and survive.
+		_context.clear_cached_outputs()
+
+		# Restore cached outputs for all active outer ARRAY loops (nested
+		# forEach support — mirrors _handle_for_each_loop). Outer MAP loops need
+		# no restore: their loop_key/loop_value are not wiped by the cache clear.
+		for frame in _context.loop_stack:
+			var outer_state := _context.get_node_state(frame.node_id)
+			if outer_state.loop_initialized and outer_state.loop_index < outer_state.loop_array.size():
+				outer_state.cached_output = outer_state.loop_array[outer_state.loop_index]
+
+		# Expose the current entry's key/value (read by the typed evaluators
+		# via the "-key"/"-value" source handle suffixes)
+		node_state.loop_key = node_state.loop_keys[node_state.loop_index]
+		var entry_value = node_state.loop_values[node_state.loop_index]
+		node_state.loop_value = entry_value if entry_value is StoryFlowVariant else null
+
+		var value_str: String = node_state.loop_value.to_display_string() if node_state.loop_value else ""
+		_sf_trace("LOOP %s index=%d key=%s value=%s" % [node_id, node_state.loop_index, str(node_state.loop_key), value_str])
+
+		# Push loop context for this iteration
+		var loop_frame := StoryFlowLoopFrame.new()
+		loop_frame.node_id = node_id
+		loop_frame.type = StoryFlowTypes.LoopType.FOR_EACH
+		_context.loop_stack.push_back(loop_frame)
+
+		# Execute loop body
+		_process_next_node(StoryFlowHandles.source(node_id, StoryFlowHandles.OUT_LOOP_BODY))
+	else:
+		# Loop complete - cleanup all loop state
+		node_state.loop_initialized = false
+		node_state.loop_keys = []
+		node_state.loop_values = []
+		node_state.loop_key = null
+		node_state.loop_value = null
+		node_state.cached_output = null
+
+		if _context.loop_stack.size() > 0 and _context.loop_stack.back().node_id == node_id:
+			_context.loop_stack.pop_back()
+
+		# Continue after loop
+		_process_next_node(StoryFlowHandles.source(node_id, StoryFlowHandles.OUT_LOOP_COMPLETED))
+
+
+## Deep-duplicate a map's entries into a fresh Dictionary (per-value
+## duplicate_variant copy). Used wherever a map crosses a snapshot boundary
+## (setMap from read-only sources, setCharacterVar map writes).
+func _snapshot_map_entries(source_map: Dictionary) -> Dictionary:
+	var snapshot := {}
+	for k in source_map:
+		var entry = source_map[k]
+		snapshot[k] = entry.duplicate_variant() if entry is StoryFlowVariant else entry
+	return snapshot
+
+
+# =============================================================================
 # Node Handlers - Media Set
 # =============================================================================
 
@@ -1975,6 +2233,47 @@ func _handle_set_character_var(node: Dictionary) -> void:
 			character_path = _evaluator.evaluate_string_from_node(char_node.get("id", ""), char_edge.get("source_handle", ""))
 
 	if character_path.is_empty():
+		_handle_set_node_end(node, StoryFlowHandles.source(node["id"], StoryFlowHandles.OUT_FLOW))
+		return
+
+	# Map-typed character variables take a dedicated path: resolve the wired map
+	# input (optionId "input") and SNAPSHOT it into the character's own storage —
+	# an independent deep copy, never an alias of the source variable's live map
+	# (HTML parity: updateCharacterVariable stores the serialized entry-array form).
+	if variable_type == "map":
+		# Missing K/V types: the map input handle cannot be built — HTML
+		# short-circuits with NO write (and no trace), but exec still continues.
+		if str(data.get("keyType", "")).is_empty() or str(data.get("valueType", "")).is_empty():
+			_handle_set_node_end(node, StoryFlowHandles.source(node["id"], StoryFlowHandles.OUT_FLOW))
+			return
+
+		# Unwired or unresolved → empty (HTML defaults the new value to a fresh Map)
+		var snapshot: Dictionary = {}
+		if _evaluator:
+			var map_result: Dictionary = _evaluator.resolve_map_input(node, "input")
+			var source_map = map_result.get("map")
+			if source_map is Dictionary:
+				snapshot = _snapshot_map_entries(source_map)
+
+		# Trace shape matches the map pin on _handle_set_map (size=, not value=).
+		# HTML traces before the write gate — trace-then-gate order is parity.
+		_sf_trace('VAR SET "%s.%s" global=false size=%d' % [character_path, variable_name, snapshot.size()])
+
+		var map_mgr := get_manager()
+		if map_mgr:
+			var map_character: StoryFlowCharacter = map_mgr.get_runtime_character(character_path)
+			if map_character and map_character.variables.has(variable_name):
+				var char_var: Dictionary = map_character.variables[variable_name]
+				var char_val = char_var.get("value", null)
+				# Write only when the variable exists and is map-typed (HTML's
+				# setCharacterVariableValue type-mismatch → no write). Name/Image
+				# built-ins are never map-typed.
+				if char_val is StoryFlowVariant and char_var.get("type", -1) == StoryFlowTypes.VariableType.MAP:
+					char_val.set_map(snapshot) # fresh storage — never aliases the source
+					character_variable_changed.emit(character_path, variable_name, char_val)
+				else:
+					print_verbose("StoryFlow: SetCharacterVar map write skipped - variable '%s' on '%s' missing or not map-typed" % [variable_name, character_path])
+
 		_handle_set_node_end(node, StoryFlowHandles.source(node["id"], StoryFlowHandles.OUT_FLOW))
 		return
 
