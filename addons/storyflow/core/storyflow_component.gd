@@ -1523,10 +1523,14 @@ func _handle_array_set(node: Dictionary) -> void:
 	var variant: StoryFlowVariant = val
 
 	if is_set_element and _evaluator:
-		var inline_value = data.get("value", null)
+		# The export dialect renames set*ArrayElement's inline fallbacks: the .sfe "index"
+		# is exported as "value1" and "value" as "value2" (json-export-strategy.ts; the
+		# importer parses both at _parse_node_data). add/remove ops use plain "value".
+		var inline_index = data.get("value1", null)
+		var inline_value = data.get("value2", null)
 		var default_index := 0
-		if inline_value is StoryFlowVariant:
-			default_index = inline_value.get_int(0)
+		if inline_index is StoryFlowVariant:
+			default_index = inline_index.get_int(0)
 		var idx: int = _evaluator.evaluate_integer_input(node.get("id", ""), StoryFlowHandles.IN_INTEGER, default_index)
 		var arr: Array = variant.get_array()
 		if idx >= 0 and idx < arr.size():
