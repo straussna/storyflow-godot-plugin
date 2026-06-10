@@ -1980,10 +1980,19 @@ func _handle_set_character_var(node: Dictionary) -> void:
 
 	# Get the value to set
 	var new_value := StoryFlowVariant.new()
-	var input_handle_suffix := variable_type + "-input"
+	var is_array: bool = data.get("isArray", false)
+	# Array variables wire through "<type>-array-input", scalars through "<type>-input"
+	var input_handle_suffix := variable_type + ("-array-input" if is_array else "-input")
 	var input_edge: Dictionary = _context.current_script.find_input_edge(node["id"], input_handle_suffix)
 
-	if not input_edge.is_empty() and _evaluator:
+	if is_array:
+		if not input_edge.is_empty() and _evaluator:
+			new_value = StoryFlowVariant.from_array(_evaluate_character_var_array_input(node["id"], variable_type, input_handle_suffix))
+		else:
+			var inline_value = data.get("value", null)
+			if inline_value is StoryFlowVariant:
+				new_value = inline_value.duplicate_variant()
+	elif not input_edge.is_empty() and _evaluator:
 		var source_node: Dictionary = _context.current_script.get_node(input_edge.get("source", ""))
 		if not source_node.is_empty():
 			var source_handle: String = input_edge.get("source_handle", "")
@@ -2017,7 +2026,8 @@ func _handle_set_character_var(node: Dictionary) -> void:
 			elif inline_value is String:
 				new_value.set_string(inline_value)
 
-	_sf_trace('VAR SET "%s.%s" global=%s value=%s' % [character_path, variable_name, "true", new_value.to_display_string()])
+	var value_str := ("[%d elements]" % new_value.get_array().size()) if is_array else new_value.to_display_string()
+	_sf_trace('VAR SET "%s.%s" global=%s value=%s' % [character_path, variable_name, "true", value_str])
 
 	# Set the character variable via the manager
 	var mgr := get_manager()
@@ -2042,6 +2052,29 @@ func _handle_set_character_var(node: Dictionary) -> void:
 		character_variable_changed.emit(character_path, variable_name, new_value)
 
 	_handle_set_node_end(node, StoryFlowHandles.source(node["id"], StoryFlowHandles.OUT_FLOW))
+
+
+## Evaluate the wired array input of a setCharacterVar node, dispatching to the
+## evaluator's typed array reader for the variable's element type. Returns a
+## container copy so the character variable never aliases the source array
+## (matches the HTML runtime's .slice() semantics).
+func _evaluate_character_var_array_input(node_id: String, variable_type: String, handle_suffix: String) -> Array:
+	match variable_type:
+		"boolean":
+			return _evaluator.evaluate_bool_array_input(node_id, handle_suffix).duplicate()
+		"integer":
+			return _evaluator.evaluate_int_array_input(node_id, handle_suffix).duplicate()
+		"float":
+			return _evaluator.evaluate_float_array_input(node_id, handle_suffix).duplicate()
+		"image":
+			return _evaluator.evaluate_image_array_input(node_id, handle_suffix).duplicate()
+		"character":
+			return _evaluator.evaluate_character_array_input(node_id, handle_suffix).duplicate()
+		"audio":
+			return _evaluator.evaluate_audio_array_input(node_id, handle_suffix).duplicate()
+		_:
+			# string / enum — string-keyed storage (matches the HTML default branch)
+			return _evaluator.evaluate_string_array_input(node_id, handle_suffix).duplicate()
 
 # =============================================================================
 # Set Node End Handling (special no-outgoing-edge behavior)

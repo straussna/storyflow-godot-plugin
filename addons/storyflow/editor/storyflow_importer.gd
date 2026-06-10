@@ -545,6 +545,8 @@ func _parse_node_data(type_string: String, node_obj: Dictionary) -> Dictionary:
 		data["variableName"] = data_src["variableName"]
 	if data_src.has("variableType"):
 		data["variableType"] = data_src["variableType"]
+	if data_src.has("isArray"):
+		data["isArray"] = data_src["isArray"]
 
 	return data
 

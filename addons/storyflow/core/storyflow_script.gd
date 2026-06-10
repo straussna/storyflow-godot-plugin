@@ -93,10 +93,15 @@ func find_input_edge(node_id: String, target_suffix: String) -> Dictionary:
 	# Fallback: prefix match for handles with trailing option ID.
 	# The editor appends a numbered suffix to handles (e.g., "string-2", "string-array-1")
 	# while the runtime constants omit it (e.g., "string", "string-array").
+	# A scalar suffix ("string") must not swallow its array sibling
+	# ("string-array-1") on nodes carrying both inputs (e.g. arrayContains,
+	# getArrayElement) — the HTML runtime is immune because it queries with
+	# fully numbered handles.
 	var prefix := target_handle + "-"
+	var array_prefix := prefix + "array-"
 	for conn in incoming:
 		var th: String = conn.get("target_handle", "")
-		if not th.is_empty() and th.begins_with(prefix):
+		if not th.is_empty() and th.begins_with(prefix) and not th.begins_with(array_prefix):
 			return conn
 
 	return {}
