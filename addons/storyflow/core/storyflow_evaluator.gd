@@ -93,7 +93,8 @@ func evaluate_boolean_from_node(node_id: String, source_handle: String = "") -> 
 		_warn_unknown_evaluator_source(node)
 
 	match node_type:
-		StoryFlowTypes.NodeType.GET_BOOL:
+		StoryFlowTypes.NodeType.GET_BOOL, \
+		StoryFlowTypes.NodeType.SET_BOOL:
 			var variable := _find_variable(data)
 			if not variable.is_empty():
 				var value = variable.get("value")
@@ -226,7 +227,8 @@ func evaluate_boolean_from_node(node_id: String, source_handle: String = "") -> 
 		StoryFlowTypes.NodeType.RUN_SCRIPT:
 			result = _evaluate_run_script_output_bool(node_id, source_handle, data)
 
-		StoryFlowTypes.NodeType.GET_CHARACTER_VAR:
+		StoryFlowTypes.NodeType.GET_CHARACTER_VAR, \
+		StoryFlowTypes.NodeType.SET_CHARACTER_VAR:
 			var char_result := _evaluate_character_variable(data, node_id)
 			if char_result is StoryFlowVariant:
 				result = char_result.get_bool()
@@ -292,7 +294,8 @@ func evaluate_integer_from_node(node_id: String, source_handle: String = "") -> 
 		_warn_unknown_evaluator_source(node)
 
 	match node_type:
-		StoryFlowTypes.NodeType.GET_INT:
+		StoryFlowTypes.NodeType.GET_INT, \
+		StoryFlowTypes.NodeType.SET_INT:
 			var variable := _find_variable(data)
 			if not variable.is_empty():
 				var value = variable.get("value")
@@ -462,7 +465,8 @@ func evaluate_integer_from_node(node_id: String, source_handle: String = "") -> 
 		StoryFlowTypes.NodeType.RUN_SCRIPT:
 			result = _evaluate_run_script_output_int(node_id, source_handle, data)
 
-		StoryFlowTypes.NodeType.GET_CHARACTER_VAR:
+		StoryFlowTypes.NodeType.GET_CHARACTER_VAR, \
+		StoryFlowTypes.NodeType.SET_CHARACTER_VAR:
 			var char_result := _evaluate_character_variable(data, node_id)
 			if char_result is StoryFlowVariant:
 				result = char_result.get_int()
@@ -519,7 +523,8 @@ func evaluate_float_from_node(node_id: String, source_handle: String = "") -> fl
 		_warn_unknown_evaluator_source(node)
 
 	match node_type:
-		StoryFlowTypes.NodeType.GET_FLOAT:
+		StoryFlowTypes.NodeType.GET_FLOAT, \
+		StoryFlowTypes.NodeType.SET_FLOAT:
 			var variable := _find_variable(data)
 			if not variable.is_empty():
 				var value = variable.get("value")
@@ -586,7 +591,8 @@ func evaluate_float_from_node(node_id: String, source_handle: String = "") -> fl
 		StoryFlowTypes.NodeType.RUN_SCRIPT:
 			result = _evaluate_run_script_output_float(node_id, source_handle, data)
 
-		StoryFlowTypes.NodeType.GET_CHARACTER_VAR:
+		StoryFlowTypes.NodeType.GET_CHARACTER_VAR, \
+		StoryFlowTypes.NodeType.SET_CHARACTER_VAR:
 			var char_result := _evaluate_character_variable(data, node_id)
 			if char_result is StoryFlowVariant:
 				result = char_result.get_float()
@@ -643,7 +649,8 @@ func evaluate_string_from_node(node_id: String, source_handle: String = "") -> S
 		_warn_unknown_evaluator_source(node)
 
 	match node_type:
-		StoryFlowTypes.NodeType.GET_STRING:
+		StoryFlowTypes.NodeType.GET_STRING, \
+		StoryFlowTypes.NodeType.SET_STRING:
 			var variable := _find_variable(data)
 			if not variable.is_empty():
 				var value = variable.get("value")
@@ -671,7 +678,8 @@ func evaluate_string_from_node(node_id: String, source_handle: String = "") -> S
 			var input := evaluate_float_input(node_id, StoryFlowHandles.IN_FLOAT, _get_data_float(data, "value", 0.0))
 			result = str(input)
 
-		StoryFlowTypes.NodeType.GET_ENUM:
+		StoryFlowTypes.NodeType.GET_ENUM, \
+		StoryFlowTypes.NodeType.SET_ENUM:
 			var variable := _find_variable(data)
 			if not variable.is_empty():
 				var value = variable.get("value")
@@ -682,21 +690,29 @@ func evaluate_string_from_node(node_id: String, source_handle: String = "") -> S
 			var input := evaluate_enum_input(node_id, StoryFlowHandles.IN_ENUM, _get_data_string(data, "value"))
 			result = input
 
-		StoryFlowTypes.NodeType.GET_IMAGE:
+		StoryFlowTypes.NodeType.GET_IMAGE, \
+		StoryFlowTypes.NodeType.SET_IMAGE:
 			var variable := _find_variable(data)
 			if not variable.is_empty():
 				var value = variable.get("value")
 				if value is StoryFlowVariant:
 					result = value.get_string()
 
-		StoryFlowTypes.NodeType.GET_AUDIO:
+		StoryFlowTypes.NodeType.SET_BACKGROUND_IMAGE:
+			# As an image source the node exposes the image it sets: connected
+			# image input first, then the dropdown value (matches HTML runtime).
+			result = evaluate_string_input(node_id, StoryFlowHandles.IN_IMAGE_INPUT, _get_data_string(data, "value"))
+
+		StoryFlowTypes.NodeType.GET_AUDIO, \
+		StoryFlowTypes.NodeType.SET_AUDIO:
 			var variable := _find_variable(data)
 			if not variable.is_empty():
 				var value = variable.get("value")
 				if value is StoryFlowVariant:
 					result = value.get_string()
 
-		StoryFlowTypes.NodeType.GET_CHARACTER:
+		StoryFlowTypes.NodeType.GET_CHARACTER, \
+		StoryFlowTypes.NodeType.SET_CHARACTER:
 			var variable := _find_variable(data)
 			if not variable.is_empty():
 				var value = variable.get("value")
@@ -758,7 +774,8 @@ func evaluate_string_from_node(node_id: String, source_handle: String = "") -> S
 		StoryFlowTypes.NodeType.RUN_SCRIPT:
 			result = _evaluate_run_script_output_string(node_id, source_handle, data)
 
-		StoryFlowTypes.NodeType.GET_CHARACTER_VAR:
+		StoryFlowTypes.NodeType.GET_CHARACTER_VAR, \
+		StoryFlowTypes.NodeType.SET_CHARACTER_VAR:
 			var char_result := _evaluate_character_variable(data, node_id)
 			if char_result is StoryFlowVariant:
 				result = char_result.get_string()
@@ -806,7 +823,8 @@ func evaluate_enum_from_node(node_id: String, source_handle: String = "") -> Str
 		_warn_unknown_evaluator_source(node)
 
 	match node_type:
-		StoryFlowTypes.NodeType.GET_ENUM:
+		StoryFlowTypes.NodeType.GET_ENUM, \
+		StoryFlowTypes.NodeType.SET_ENUM:
 			var variable := _find_variable(data)
 			if not variable.is_empty():
 				var value = variable.get("value")
@@ -831,7 +849,8 @@ func evaluate_enum_from_node(node_id: String, source_handle: String = "") -> Str
 			elif enum_values.size() > 0:
 				result = str(enum_values[0])
 
-		StoryFlowTypes.NodeType.GET_CHARACTER_VAR:
+		StoryFlowTypes.NodeType.GET_CHARACTER_VAR, \
+		StoryFlowTypes.NodeType.SET_CHARACTER_VAR:
 			var char_result := _evaluate_character_variable(data, node_id)
 			if char_result is StoryFlowVariant:
 				result = char_result.get_string()
@@ -899,8 +918,8 @@ func _evaluate_array_input_generic(node_id: String, handle_suffix: String, expec
 	if source_type == StoryFlowTypes.NodeType.UNKNOWN:
 		_warn_unknown_evaluator_source(source_node)
 
-	# Handle getCharacterVar nodes that can return arrays
-	if source_type == StoryFlowTypes.NodeType.GET_CHARACTER_VAR:
+	# Handle getCharacterVar/setCharacterVar nodes that can return arrays
+	if source_type == StoryFlowTypes.NodeType.GET_CHARACTER_VAR or source_type == StoryFlowTypes.NodeType.SET_CHARACTER_VAR:
 		var variant := _evaluate_character_variable(source_data, source_id)
 		return variant.get_array()
 
