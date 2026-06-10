@@ -96,6 +96,11 @@ static func _serialize_variables(variables: Dictionary) -> Dictionary:
 			"type": v.get("type", 0),
 			"is_array": v.get("is_array", false),
 		}
+		# Map K/V type metadata lives on the variable record (set by the
+		# importer) — persist it so a loaded record keeps the same shape.
+		if v.get("type", 0) == StoryFlowTypes.VariableType.MAP:
+			entry["key_type"] = v.get("key_type", StoryFlowTypes.VariableType.STRING)
+			entry["value_type"] = v.get("value_type", StoryFlowTypes.VariableType.STRING)
 		var value: StoryFlowVariant = v.get("value", null)
 		if value != null:
 			entry["value"] = _serialize_variant(value)
@@ -114,6 +119,25 @@ static func _serialize_variant(v: StoryFlowVariant) -> Dictionary:
 			result["value"] = v.get_float()
 		StoryFlowTypes.VariableType.STRING, StoryFlowTypes.VariableType.ENUM:
 			result["value"] = v.get_string()
+		StoryFlowTypes.VariableType.MAP:
+			# Ordered [{key, value}, ...] entry list mirroring the editor export
+			# shape: raw keys (int or String — JSON keeps the distinction),
+			# typed variant values. Values persist EXACTLY as held in memory —
+			# in this engine string values resolve through the strings table at
+			# READ time (see the evaluator's _resolve_string_key), so what's in
+			# memory (and in the save) is usually the raw table key, identical
+			# to how scalar string variables persist. Keys never resolve.
+			# NOTE: aliasing topology does NOT survive a round-trip — every
+			# variable serializes its own entries, so two variables sharing
+			# storage via setMap reload as equal-but-detached maps (same
+			# posture as the Unreal and HTML runtimes).
+			var entries := []
+			var map: Dictionary = v.get_map()
+			for key in map:
+				var entry_value = map[key]
+				if entry_value is StoryFlowVariant:
+					entries.append({"key": key, "value": _serialize_variant(entry_value)})
+			result["value"] = entries
 		_:
 			result["value"] = null
 	# Serialize arrays
@@ -134,6 +158,9 @@ static func _serialize_characters(characters: Dictionary) -> Dictionary:
 		for vname in c.variables:
 			var vdata: Dictionary = c.variables[vname]
 			var entry := {"type": vdata.get("type", 0)}
+			if vdata.get("type", 0) == StoryFlowTypes.VariableType.MAP:
+				entry["key_type"] = vdata.get("key_type", StoryFlowTypes.VariableType.STRING)
+				entry["value_type"] = vdata.get("value_type", StoryFlowTypes.VariableType.STRING)
 			var value: StoryFlowVariant = vdata.get("value", null)
 			if value != null:
 				entry["value"] = _serialize_variant(value)
@@ -152,6 +179,10 @@ static func _deserialize_variables(data: Dictionary) -> Dictionary:
 			"type": int(entry.get("type", 0)),
 			"is_array": entry.get("is_array", false),
 		}
+		# Restore map K/V type metadata (absent on pre-map saves → string defaults)
+		if v["type"] == StoryFlowTypes.VariableType.MAP:
+			v["key_type"] = int(entry.get("key_type", StoryFlowTypes.VariableType.STRING))
+			v["value_type"] = int(entry.get("value_type", StoryFlowTypes.VariableType.STRING))
 		if entry.has("value"):
 			v["value"] = _deserialize_variant(entry["value"])
 		result[var_id] = v
@@ -173,6 +204,25 @@ static func _deserialize_variant(data) -> StoryFlowVariant:
 				v.set_string(str(data.get("value", "")))
 			StoryFlowTypes.VariableType.ENUM:
 				v.set_enum(str(data.get("value", "")))
+			StoryFlowTypes.VariableType.MAP:
+				# Tolerant: absent/malformed entry list degrades to an empty map
+				# with the MAP type preserved (set_map types the variant); a
+				# keyless entry is skipped. JSON numbers parse as float — coerce
+				# numeric keys back to the int storage type (the importer's key
+				# coercion rule); everything else stores as String.
+				var entries := {}
+				var raw = data.get("value")
+				if raw is Array:
+					for entry_obj in raw:
+						if not (entry_obj is Dictionary) or not entry_obj.has("key"):
+							continue
+						var key = entry_obj["key"]
+						if key is float:
+							key = int(key)
+						elif not (key is int):
+							key = str(key)
+						entries[key] = _deserialize_variant(entry_obj.get("value"))
+				v.set_map(entries)
 		if data.has("array"):
 			var arr: Array = []
 			for elem in data["array"]:
@@ -191,6 +241,9 @@ static func _deserialize_characters(data: Dictionary) -> Dictionary:
 		for vname in vars_data:
 			var ventry: Dictionary = vars_data[vname]
 			var vdata := {"name": vname, "type": int(ventry.get("type", 0))}
+			if vdata["type"] == StoryFlowTypes.VariableType.MAP:
+				vdata["key_type"] = int(ventry.get("key_type", StoryFlowTypes.VariableType.STRING))
+				vdata["value_type"] = int(ventry.get("value_type", StoryFlowTypes.VariableType.STRING))
 			if ventry.has("value"):
 				vdata["value"] = _deserialize_variant(ventry["value"])
 			vars[vname] = vdata

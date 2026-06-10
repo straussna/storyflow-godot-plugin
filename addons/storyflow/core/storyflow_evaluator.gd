@@ -106,6 +106,10 @@ func evaluate_boolean_from_node(node_id: String, source_handle: String = "") -> 
 				var value = variable.get("value")
 				if value is StoryFlowVariant:
 					result = value.get_bool()
+			# HTML parity: the evaluator's get/set arm emits VAR GET on every
+			# data pull (runtime-evaluators.js), before the EVAL line below —
+			# never when the node sits in the exec chain (see _handle_get_bool).
+			_sf_trace('VAR GET "%s" global=%s value=%s' % [variable.get("name", data.get("variable", "")), str(data.get("isGlobal", false)).to_lower(), str(result).to_lower()])
 
 		StoryFlowTypes.NodeType.NOT_BOOL:
 			var input := evaluate_boolean_input(node_id, StoryFlowHandles.IN_BOOLEAN, _get_data_bool(data, "value", false))
@@ -294,7 +298,9 @@ func evaluate_boolean_from_node(node_id: String, source_handle: String = "") -> 
 	if not is_map_read:
 		node_state.cached_output = StoryFlowVariant.from_bool(result)
 
-	_sf_trace("EVAL %s %s result=%s" % [node_id, StoryFlowComponent._node_type_name(node_type), str(result).to_lower()])
+	# Trace the wire-name (type_string), not the SCREAMING enum key — the
+	# cross-runtime fixture pins e.g. "hasMapKey". (Same in every evaluator.)
+	_sf_trace("EVAL %s %s result=%s" % [node_id, node.get("type_string", ""), str(result).to_lower()])
 
 	_context.evaluation_depth -= 1
 	return result
@@ -350,6 +356,9 @@ func evaluate_integer_from_node(node_id: String, source_handle: String = "") -> 
 				var value = variable.get("value")
 				if value is StoryFlowVariant:
 					result = value.get_int()
+			# HTML parity: VAR GET on every data pull, before the EVAL line
+			# (see the boolean evaluator's arm)
+			_sf_trace('VAR GET "%s" global=%s value=%s' % [variable.get("name", data.get("variable", "")), str(data.get("isGlobal", false)).to_lower(), str(result)])
 
 		StoryFlowTypes.NodeType.PLUS:
 			var input1 := evaluate_integer_input(node_id, StoryFlowHandles.IN_INTEGER1, _get_data_int(data, "value1", 0))
@@ -551,7 +560,7 @@ func evaluate_integer_from_node(node_id: String, source_handle: String = "") -> 
 		_:
 			result = 0
 
-	_sf_trace("EVAL %s %s result=%s" % [node_id, StoryFlowComponent._node_type_name(node_type), str(result)])
+	_sf_trace("EVAL %s %s result=%s" % [node_id, node.get("type_string", ""), str(result)])
 
 	_context.evaluation_depth -= 1
 	return result
@@ -607,6 +616,8 @@ func evaluate_float_from_node(node_id: String, source_handle: String = "") -> fl
 				var value = variable.get("value")
 				if value is StoryFlowVariant:
 					result = value.get_float()
+			# HTML parity: VAR GET on every data pull (see the boolean evaluator's arm)
+			_sf_trace('VAR GET "%s" global=%s value=%s' % [variable.get("name", data.get("variable", "")), str(data.get("isGlobal", false)).to_lower(), str(result)])
 
 		StoryFlowTypes.NodeType.PLUS_FLOAT:
 			var input1 := evaluate_float_input(node_id, StoryFlowHandles.IN_FLOAT1, _get_data_float(data, "value1", 0.0))
@@ -696,7 +707,7 @@ func evaluate_float_from_node(node_id: String, source_handle: String = "") -> fl
 		_:
 			result = 0.0
 
-	_sf_trace("EVAL %s %s result=%s" % [node_id, StoryFlowComponent._node_type_name(node_type), str(result)])
+	_sf_trace("EVAL %s %s result=%s" % [node_id, node.get("type_string", ""), str(result)])
 
 	_context.evaluation_depth -= 1
 	return result
@@ -752,6 +763,10 @@ func evaluate_string_from_node(node_id: String, source_handle: String = "") -> S
 				var value = variable.get("value")
 				if value is StoryFlowVariant:
 					result = value.get_string()
+			# HTML parity: VAR GET on every data pull (see the boolean
+			# evaluator's arm). The value traces RAW (pre-_resolve_string_key),
+			# matching HTML which traces the stored variable value.
+			_sf_trace('VAR GET "%s" global=%s value=%s' % [variable.get("name", data.get("variable", "")), str(data.get("isGlobal", false)).to_lower(), result])
 
 		StoryFlowTypes.NodeType.CONCATENATE_STRING:
 			var input1 := evaluate_string_input(node_id, StoryFlowHandles.IN_STRING1, _get_localized_data_string(data, "value1"))
@@ -781,6 +796,8 @@ func evaluate_string_from_node(node_id: String, source_handle: String = "") -> S
 				var value = variable.get("value")
 				if value is StoryFlowVariant:
 					result = value.get_string()
+			# HTML parity: VAR GET on every data pull (see the boolean evaluator's arm)
+			_sf_trace('VAR GET "%s" global=%s value=%s' % [variable.get("name", data.get("variable", "")), str(data.get("isGlobal", false)).to_lower(), result])
 
 		StoryFlowTypes.NodeType.ENUM_TO_STRING:
 			var input := evaluate_enum_input(node_id, StoryFlowHandles.IN_ENUM, _get_data_string(data, "value"))
@@ -799,6 +816,8 @@ func evaluate_string_from_node(node_id: String, source_handle: String = "") -> S
 				var value = variable.get("value")
 				if value is StoryFlowVariant:
 					result = value.get_string()
+			# HTML parity: VAR GET on every data pull (see the boolean evaluator's arm)
+			_sf_trace('VAR GET "%s" global=%s value=%s' % [variable.get("name", data.get("variable", "")), str(data.get("isGlobal", false)).to_lower(), result])
 
 		StoryFlowTypes.NodeType.SET_BACKGROUND_IMAGE:
 			# As an image source the node exposes the image it sets: connected
@@ -812,6 +831,8 @@ func evaluate_string_from_node(node_id: String, source_handle: String = "") -> S
 				var value = variable.get("value")
 				if value is StoryFlowVariant:
 					result = value.get_string()
+			# HTML parity: VAR GET on every data pull (see the boolean evaluator's arm)
+			_sf_trace('VAR GET "%s" global=%s value=%s' % [variable.get("name", data.get("variable", "")), str(data.get("isGlobal", false)).to_lower(), result])
 
 		StoryFlowTypes.NodeType.GET_CHARACTER, \
 		StoryFlowTypes.NodeType.SET_CHARACTER:
@@ -820,6 +841,8 @@ func evaluate_string_from_node(node_id: String, source_handle: String = "") -> S
 				var value = variable.get("value")
 				if value is StoryFlowVariant:
 					result = value.get_string()
+			# HTML parity: VAR GET on every data pull (see the boolean evaluator's arm)
+			_sf_trace('VAR GET "%s" global=%s value=%s' % [variable.get("name", data.get("variable", "")), str(data.get("isGlobal", false)).to_lower(), result])
 
 		StoryFlowTypes.NodeType.GET_STRING_ARRAY_ELEMENT:
 			var arr := evaluate_string_array_input(node_id, StoryFlowHandles.IN_STRING_ARRAY)
@@ -915,7 +938,7 @@ func evaluate_string_from_node(node_id: String, source_handle: String = "") -> S
 			result = ""
 
 	var resolved_result := _resolve_string_key(result)
-	_sf_trace("EVAL %s %s result=%s" % [node_id, StoryFlowComponent._node_type_name(node_type), resolved_result])
+	_sf_trace("EVAL %s %s result=%s" % [node_id, node.get("type_string", ""), resolved_result])
 
 	_context.evaluation_depth -= 1
 	return resolved_result
@@ -983,7 +1006,7 @@ func evaluate_enum_from_node(node_id: String, source_handle: String = "") -> Str
 		_:
 			result = ""
 
-	_sf_trace("EVAL %s %s result=%s" % [node_id, StoryFlowComponent._node_type_name(node_type), result])
+	_sf_trace("EVAL %s %s result=%s" % [node_id, node.get("type_string", ""), result])
 
 	_context.evaluation_depth -= 1
 	return result
@@ -1206,9 +1229,8 @@ const MAP_SOURCE_RUN_SCRIPT := "run_script_output"
 ## until a terminal variable-bound node (hop-bounded against cyclic graphs;
 ## the HTML recursion has no guard, we fail to unresolved).
 func resolve_map_input(node: Dictionary, option_id: String) -> Dictionary:
-	var unresolved := {"map": null, "kind": MAP_SOURCE_UNRESOLVED, "is_global": false, "variable": {}}
-	if not _context or not _context.current_script or node.is_empty():
-		return unresolved
+	if node.is_empty():
+		return {"map": null, "kind": MAP_SOURCE_UNRESOLVED, "is_global": false, "variable": {}}
 
 	var data: Dictionary = node.get("data", {})
 	var key_type: String = str(data.get("keyType", ""))
@@ -1217,9 +1239,22 @@ func resolve_map_input(node: Dictionary, option_id: String) -> Dictionary:
 	# the input handle cannot be built, so resolution fails to defaults.
 	if key_type.is_empty() or value_type.is_empty():
 		_warn_missing_map_types(node)
+		return {"map": null, "kind": MAP_SOURCE_UNRESOLVED, "is_global": false, "variable": {}}
+
+	return resolve_map_input_by_handle(node, StoryFlowHandles.in_map(key_type, value_type, option_id))
+
+
+## [method resolve_map_input] with an EXPLICIT target handle suffix instead of
+## one built from the node's keyType/valueType data. Needed for runScript map
+## parameters, whose handles ("map-param-{id}") carry no K/V types — the
+## editor's scriptInterface does not bake them in (mirrors the Unreal port's
+## ResolveMapInputVariableByHandle). Same result contract as resolve_map_input.
+func resolve_map_input_by_handle(node: Dictionary, handle_suffix: String) -> Dictionary:
+	var unresolved := {"map": null, "kind": MAP_SOURCE_UNRESOLVED, "is_global": false, "variable": {}}
+	if not _context or not _context.current_script or node.is_empty():
 		return unresolved
 
-	var edge := _context.current_script.find_input_edge(node.get("id", ""), StoryFlowHandles.in_map(key_type, value_type, option_id))
+	var edge := _context.current_script.find_input_edge(node.get("id", ""), handle_suffix)
 	if edge.is_empty():
 		return unresolved
 
@@ -1245,8 +1280,8 @@ func resolve_map_input(node: Dictionary, option_id: String) -> Dictionary:
 		var upstream_edge := _context.current_script.find_input_edge(source_node.get("id", ""), StoryFlowHandles.in_map(mutator_key_type, mutator_value_type, "2"))
 		if upstream_edge.is_empty():
 			return unresolved
-		# Keep the terminal edge — its source_handle will carry the runScript
-		# "-out-" UUID once the P3 runScript arm lands.
+		# Keep the terminal edge — its source_handle carries the runScript
+		# "-out-" UUID the RUN_SCRIPT arm below parses.
 		edge = upstream_edge
 		source_node = _context.current_script.get_node(upstream_edge.get("source", ""))
 
@@ -1324,12 +1359,34 @@ func resolve_map_input(node: Dictionary, option_id: String) -> Dictionary:
 			}
 
 		StoryFlowTypes.NodeType.RUN_SCRIPT:
-			# TODO(P3 — runScript map ports): resolve map-typed runScript outputs
-			# (detached snapshot, READ-ONLY kind MAP_SOURCE_RUN_SCRIPT). Until
-			# then the chain is unresolved: reads return defaults, mutators
-			# no-op, setMap wipes to a fresh empty map — matching HTML's
-			# "missing _outputValues returns an empty Map" pin.
-			return unresolved
+			# Map-typed runScript outputs. The HTML runtime's evaluateMapFromNode
+			# reads _outputValues[uuid] and converts the serialized entry array
+			# to a FRESH Map at the read site — observably a DETACHED snapshot
+			# crossing the call boundary. _handle_end stores map outputs as
+			# detached deep copies in the node's output_values (keyed by the
+			# scriptInterface output id, with variable-name fallback — the same
+			# store the scalar _evaluate_run_script_output_* helpers read), so
+			# this arm resolves against that and flags the source READ-ONLY:
+			# mutating a dead invocation's output is meaningless (HTML mutations
+			# land on the converted fresh Map and are lost). Missing outputs are
+			# unresolved — reads return defaults and setMap wipes to a fresh
+			# empty map, matching HTML's "missing _outputValues returns an
+			# empty Map" pin.
+			var rs_state := _context.get_node_state(source_node.get("id", ""))
+			if not rs_state.has_output_values:
+				return unresolved
+			var out_var_id := _extract_run_script_output_var_id(edge.get("source_handle", ""))
+			if out_var_id.is_empty() or not rs_state.output_values.has(out_var_id):
+				return unresolved
+			var out_val = rs_state.output_values[out_var_id]
+			if not (out_val is StoryFlowVariant) or not out_val.is_map():
+				return unresolved
+			return {
+				"map": out_val.get_map(),
+				"kind": MAP_SOURCE_RUN_SCRIPT,
+				"is_global": false,
+				"variable": {},
+			}
 
 	# Any other terminal node type cannot bind a map variable.
 	return unresolved
@@ -1387,11 +1444,15 @@ func evaluate_map_op_value_input(node: Dictionary, option_id: String) -> StoryFl
 			return StoryFlowVariant.from_string(evaluate_string_input(node_id, handle_suffix, _get_data_string(data, "value")))
 
 
-## Compute a getMapValue read. Mirrors the HTML runtime's computeGetMapValue:
-## resolve the key (input "2" / inline fallback) FIRST, then the map (input
-## "1") and consume it immediately. Returns { "found": bool, "value":
-## StoryFlowVariant or null } — miss/unresolved leaves value null and
-## found=false; the typed evaluator arms apply the valueType default.
+## Compute a getMapValue read. The key (input "2" / inline fallback) is
+## resolved FIRST, then the map (input "1") is resolved and consumed
+## immediately — the HTML runtime actually resolves map-first, but this
+## key-first order mirrors the Unreal port's pointer-lifetime rule (no eval
+## may run between resolving the live map and using it) and is observably
+## equivalent: key and map evaluations don't affect each other. Returns
+## { "found": bool, "value": StoryFlowVariant or null } — miss/unresolved
+## leaves value null and found=false; the typed evaluator arms apply the
+## valueType default.
 func _compute_get_map_value(node: Dictionary) -> Dictionary:
 	var key = evaluate_map_op_key_input(node, "2")
 	var map_result := resolve_map_input(node, "1")

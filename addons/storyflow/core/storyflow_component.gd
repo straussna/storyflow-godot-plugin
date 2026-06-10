@@ -618,6 +618,46 @@ func get_array_variable(variable_name: String) -> Array[StoryFlowVariant]:
 		out.append(copy)
 	return out
 
+
+## Read any map variable by display name.
+##
+## Returns a Dictionary of key -> StoryFlowVariant value, in insertion order.
+## Keys are raw int (integer key type) or String (string/enum key types) and
+## are NEVER routed through the string table — the runtime-wide map rule:
+## values localize, keys are identifiers. String and enum VALUES are resolved
+## through the string table like [method get_array_variable] elements; image,
+## audio, and character values pass through unchanged (asset keys / paths).
+##
+## The returned Dictionary and its values are COPIES, never the live storage:
+## map variables can share storage with each other (setMap aliasing), so
+## handing out the live Dictionary would let game code corrupt every aliased
+## variable at once. Returns an empty Dictionary if the variable is missing
+## or is not a map.
+func get_map_variable(variable_name: String) -> Dictionary:
+	var out := {}
+	var result := _find_variable_by_display_name(variable_name)
+	if result.is_empty():
+		return out
+	var v: Dictionary = result["variable"]
+	if v.get("type", -1) != StoryFlowTypes.VariableType.MAP:
+		push_warning("StoryFlow: Variable '%s' is not a map" % variable_name)
+		return out
+	var val = v.get("value", null)
+	if not (val is StoryFlowVariant):
+		return out
+	var map: Dictionary = val.get_map()
+	for key in map:
+		var entry = map[key]
+		if not (entry is StoryFlowVariant):
+			continue
+		var copy: StoryFlowVariant = entry.duplicate_variant()
+		if copy.type == StoryFlowTypes.VariableType.STRING:
+			copy.set_string(_resolve_string(copy.get_string("")))
+		elif copy.type == StoryFlowTypes.VariableType.ENUM:
+			copy.set_enum(_resolve_string(copy.get_string("")))
+		out[key] = copy
+	return out
+
 # =============================================================================
 # Utility Functions
 # =============================================================================
@@ -641,13 +681,6 @@ func _sf_trace(msg: String) -> void:
 	if trace_enabled:
 		print("[SF-TRACE] " + msg)
 
-
-static func _node_type_name(node_type: StoryFlowTypes.NodeType) -> String:
-	var keys := StoryFlowTypes.NodeType.keys()
-	var idx := int(node_type)
-	if idx >= 0 and idx < keys.size():
-		return keys[idx]
-	return "UNKNOWN"
 
 # =============================================================================
 # Dispatch Table
@@ -815,7 +848,15 @@ func _process_node(node: Dictionary) -> void:
 	_context.current_node_id = node.get("id", "")
 
 	var node_type: StoryFlowTypes.NodeType = node.get("type", StoryFlowTypes.NodeType.UNKNOWN)
-	_sf_trace("NODE %s %s" % [node.get("id", ""), _node_type_name(node_type)])
+	# Trace parity: the HTML runtime never processes start nodes — every entry
+	# point (initial load, runScript, flows) follows the edge out of "0" and
+	# processes its TARGET directly, so HTML traces contain no start hop. Godot
+	# routes through the start node; suppress its NODE line (and the matching
+	# EDGE line in _process_next_node) so traces diff 1:1 against the
+	# map-trace-fixture. The wire-name (type_string) is traced, not the
+	# SCREAMING enum key — the fixture pins e.g. "setMapValue".
+	if node_type != StoryFlowTypes.NodeType.START:
+		_sf_trace("NODE %s %s" % [node.get("id", ""), node.get("type_string", "")])
 
 	if _node_handlers.has(node_type):
 		var handler: Callable = _node_handlers[node_type]
@@ -836,7 +877,11 @@ func _process_next_node(source_handle: String) -> void:
 
 	var target_id: String = edge.get("target", "")
 	var source_node_id: String = edge.get("source", "")
-	_sf_trace("EDGE %s:%s -> %s" % [source_node_id, source_handle, target_id])
+	# Trace parity: suppress the edge OUT of a start node — the HTML runtime
+	# follows it without tracing (see the matching NODE gate in _process_node).
+	var edge_source_node: Dictionary = _context.current_script.get_node(source_node_id)
+	if edge_source_node.get("type", -1) != StoryFlowTypes.NodeType.START:
+		_sf_trace("EDGE %s:%s -> %s" % [source_node_id, source_handle, target_id])
 
 	var target_node: Dictionary = _context.current_script.get_node(target_id)
 	if target_node.is_empty():
@@ -889,14 +934,21 @@ func _handle_end(node: Dictionary) -> void:
 					# Exit handle not connected - stay in called script
 					return
 
-		# Gather output variable values from the called script (by name for mapping)
+		# Gather output variable values from the called script (by name for mapping).
+		# Map-typed outputs DETACH (duplicate_variant deep-copies the entries):
+		# the callee's live variant may alias other storage (setMap), and the
+		# HTML runtime converts _outputValues entry arrays to a fresh Map at the
+		# read site — the call boundary is observably a snapshot both ways.
 		var output_by_name: Dictionary = {}
 		for var_id in _context.local_variables:
 			var v: Dictionary = _context.local_variables[var_id]
 			if v.get("is_output", false):
 				var var_name: String = v.get("name", "")
 				if not var_name.is_empty():
-					output_by_name[var_name] = v.get("value", null)
+					var out_val = v.get("value", null)
+					if out_val is StoryFlowVariant and out_val.is_map():
+						out_val = out_val.duplicate_variant()
+					output_by_name[var_name] = out_val
 
 		# Pop call stack
 		var frame: StoryFlowCallFrame = _context.call_stack.pop_back()
@@ -1100,7 +1152,22 @@ func _handle_run_script(node: Dictionary) -> void:
 				if _context.current_script.find_input_edge(node["id"], handle_suffix).is_empty():
 					continue
 
-				if param_type == "boolean":
+				if param_type == "map":
+					# Map parameters resolve by EXPLICIT handle ("map-param-{id}"):
+					# the editor's scriptInterface carries no key/value types for
+					# map params, so unlike map op handles none are baked into the
+					# handle ID. Maps cross the call boundary BY VALUE (HTML's
+					# getTypedInput hands over `new Map(...)`): snapshot the
+					# entries so the callee's variable never aliases the caller's.
+					# Wired-but-unresolved passes an empty map (HTML's getMapInput
+					# empty-Map fallback); from_map types the variant explicitly.
+					var map_result: Dictionary = _evaluator.resolve_map_input_by_handle(node, handle_suffix)
+					var source_map = map_result.get("map")
+					var entries: Dictionary = {}
+					if source_map is Dictionary:
+						entries = _snapshot_map_entries(source_map)
+					param_values[param_name] = StoryFlowVariant.from_map(entries)
+				elif param_type == "boolean":
 					param_values[param_name] = StoryFlowVariant.from_bool(
 						_evaluator.evaluate_boolean_input(node.get("id", ""), handle_suffix, false)
 					)
@@ -1212,72 +1279,29 @@ func _handle_entry_flow(node: Dictionary) -> void:
 # =============================================================================
 
 func _handle_get_bool(node: Dictionary) -> void:
-	var data: Dictionary = node.get("data", {})
-	var var_id: String = data.get("variable", "")
-	var is_global: bool = data.get("isGlobal", false)
-	var variable: Dictionary = _find_variable(var_id, is_global)
-	var val_str := "false"
-	if not variable.is_empty():
-		var val = variable.get("value", null)
-		if val is StoryFlowVariant:
-			val_str = str(val.get_bool()).to_lower()
-	_sf_trace('VAR GET "%s" global=%s value=%s' % [variable.get("name", var_id), str(is_global).to_lower(), val_str])
+	# Data node — just continue. No VAR GET trace here: the HTML runtime emits
+	# VAR GET on data-pull EVALUATION of get/set variable nodes (see the
+	# evaluator arms), never when a get node sits in the exec chain.
 	_process_next_node(StoryFlowHandles.source(node["id"], StoryFlowHandles.OUT_BOOLEAN))
 
 
 func _handle_get_int(node: Dictionary) -> void:
-	var data: Dictionary = node.get("data", {})
-	var var_id: String = data.get("variable", "")
-	var is_global: bool = data.get("isGlobal", false)
-	var variable: Dictionary = _find_variable(var_id, is_global)
-	var val_str := "0"
-	if not variable.is_empty():
-		var val = variable.get("value", null)
-		if val is StoryFlowVariant:
-			val_str = str(val.get_int())
-	_sf_trace('VAR GET "%s" global=%s value=%s' % [variable.get("name", var_id), str(is_global).to_lower(), val_str])
+	# No VAR GET trace — see _handle_get_bool
 	_process_next_node(StoryFlowHandles.source(node["id"], StoryFlowHandles.OUT_INTEGER))
 
 
 func _handle_get_float(node: Dictionary) -> void:
-	var data: Dictionary = node.get("data", {})
-	var var_id: String = data.get("variable", "")
-	var is_global: bool = data.get("isGlobal", false)
-	var variable: Dictionary = _find_variable(var_id, is_global)
-	var val_str := "0"
-	if not variable.is_empty():
-		var val = variable.get("value", null)
-		if val is StoryFlowVariant:
-			val_str = str(val.get_float())
-	_sf_trace('VAR GET "%s" global=%s value=%s' % [variable.get("name", var_id), str(is_global).to_lower(), val_str])
+	# No VAR GET trace — see _handle_get_bool
 	_process_next_node(StoryFlowHandles.source(node["id"], StoryFlowHandles.OUT_FLOAT))
 
 
 func _handle_get_string(node: Dictionary) -> void:
-	var data: Dictionary = node.get("data", {})
-	var var_id: String = data.get("variable", "")
-	var is_global: bool = data.get("isGlobal", false)
-	var variable: Dictionary = _find_variable(var_id, is_global)
-	var val_str := ""
-	if not variable.is_empty():
-		var val = variable.get("value", null)
-		if val is StoryFlowVariant:
-			val_str = val.get_string()
-	_sf_trace('VAR GET "%s" global=%s value=%s' % [variable.get("name", var_id), str(is_global).to_lower(), val_str])
+	# No VAR GET trace — see _handle_get_bool
 	_process_next_node(StoryFlowHandles.source(node["id"], StoryFlowHandles.OUT_STRING))
 
 
 func _handle_get_enum(node: Dictionary) -> void:
-	var data: Dictionary = node.get("data", {})
-	var var_id: String = data.get("variable", "")
-	var is_global: bool = data.get("isGlobal", false)
-	var variable: Dictionary = _find_variable(var_id, is_global)
-	var val_str := ""
-	if not variable.is_empty():
-		var val = variable.get("value", null)
-		if val is StoryFlowVariant:
-			val_str = val.get_string()
-	_sf_trace('VAR GET "%s" global=%s value=%s' % [variable.get("name", var_id), str(is_global).to_lower(), val_str])
+	# No VAR GET trace — see _handle_get_bool
 	_process_next_node(StoryFlowHandles.source(node["id"], StoryFlowHandles.OUT_ENUM))
 
 # =============================================================================
@@ -1883,6 +1907,10 @@ func _handle_set_map(node: Dictionary) -> void:
 
 	# Missing K/V types: the map input handle cannot be built — behave as
 	# disconnected (keep the current value, still trace and dispatch).
+	# Informational divergence: HTML falls back to the bound variable's own
+	# keyType/valueType to build the handle here; Godot treats the node as
+	# disconnected instead. Unreachable via real editor exports (catalog map
+	# nodes always carry keyType/valueType in node data).
 	if _evaluator and not key_type.is_empty() and not value_type.is_empty():
 		var handle_suffix := StoryFlowHandles.in_map(key_type, value_type, "2")
 		var edge: Dictionary = _context.current_script.find_input_edge(node["id"], handle_suffix)
@@ -1928,9 +1956,12 @@ func _handle_map_modify(node: Dictionary) -> void:
 		_handle_set_node_end(node, flow_handle)
 		return
 
-	# Resolve ALL non-map inputs FIRST, THEN the live map (mirrors the Unreal
-	# port's input-order rule and the HTML evaluation order): key (input "3"),
-	# and for setMapValue the typed value (input "4" with the inline fallback).
+	# Resolve ALL non-map inputs FIRST, THEN the live map: key (input "3"), and
+	# for setMapValue the typed value (input "4" with the inline fallback).
+	# The HTML runtime actually resolves the map FIRST — this key/value-first
+	# order mirrors the Unreal port's pointer-lifetime rule (no eval may run
+	# between resolving the live map and mutating it) and is observably
+	# equivalent: key/value evaluations cannot change which map resolves.
 	var key = null
 	if node_type != StoryFlowTypes.NodeType.CLEAR_MAP:
 		key = _evaluator.evaluate_map_op_key_input(node, "3")
