@@ -18,5 +18,9 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 # tests depend on. Safe to run repeatedly.
 & $GodotExe --headless --path $repoRoot --import | Out-Null
 
+$failed = 0
 & $GodotExe --headless --path $repoRoot --script res://tests/test_enum_conversions.gd
-exit $LASTEXITCODE
+if ($LASTEXITCODE -ne 0) { $failed = 1 }
+& $GodotExe --headless --path $repoRoot --script res://tests/test_array_variable_setters.gd
+if ($LASTEXITCODE -ne 0) { $failed = 1 }
+exit $failed

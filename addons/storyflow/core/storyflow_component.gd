@@ -619,6 +619,98 @@ func get_array_variable(variable_name: String) -> Array[StoryFlowVariant]:
 	return out
 
 
+## Write a boolean array variable by display name.
+##
+## Replaces the variable's elements and emits [signal variable_changed], like
+## the scalar setters; if a dialogue is currently showing, its text re-renders
+## with the new values. Searches local script variables first (during
+## dialogue), then globals. Mirrors the Unity and Unreal plugins'
+## Set*ArrayVariable API.
+func set_bool_array_variable(variable_name: String, values: Array[bool]) -> void:
+	var elements: Array = []
+	for value in values:
+		elements.append(StoryFlowVariant.from_bool(value))
+	_apply_array_variable(variable_name, elements)
+
+
+## Write an integer array variable by display name. See
+## [method set_bool_array_variable] for the shared rules.
+func set_int_array_variable(variable_name: String, values: Array[int]) -> void:
+	var elements: Array = []
+	for value in values:
+		elements.append(StoryFlowVariant.from_int(value))
+	_apply_array_variable(variable_name, elements)
+
+
+## Write a float array variable by display name. See
+## [method set_bool_array_variable] for the shared rules.
+func set_float_array_variable(variable_name: String, values: Array[float]) -> void:
+	var elements: Array = []
+	for value in values:
+		elements.append(StoryFlowVariant.from_float(value))
+	_apply_array_variable(variable_name, elements)
+
+
+## Write a string array variable by display name. Elements are stored
+## verbatim — no string-table key is created, so they are language-locked and
+## bypass localization. See [method set_bool_array_variable] for the shared
+## rules.
+func set_string_array_variable(variable_name: String, values: Array[String]) -> void:
+	var elements: Array = []
+	for value in values:
+		elements.append(StoryFlowVariant.from_string(value))
+	_apply_array_variable(variable_name, elements)
+
+
+## Write an enum array variable by display name. Values are enum option
+## strings; they are stored verbatim without validation against the variable's
+## option list. See [method set_bool_array_variable] for the shared rules.
+func set_enum_array_variable(variable_name: String, values: Array[String]) -> void:
+	var elements: Array = []
+	for value in values:
+		elements.append(StoryFlowVariant.from_enum(value))
+	_apply_array_variable(variable_name, elements)
+
+
+## Write an image array variable by display name. Each entry is an asset key
+## resolvable through the standard asset pools. Stored as plain strings,
+## matching how imported arrays hold their elements. See
+## [method set_bool_array_variable] for the shared rules.
+func set_image_array_variable(variable_name: String, asset_keys: Array[String]) -> void:
+	var elements: Array = []
+	for key in asset_keys:
+		elements.append(StoryFlowVariant.from_string(key))
+	_apply_array_variable(variable_name, elements)
+
+
+## Write an audio array variable by display name. Each entry is an asset key.
+## See [method set_bool_array_variable] for the shared rules.
+func set_audio_array_variable(variable_name: String, asset_keys: Array[String]) -> void:
+	var elements: Array = []
+	for key in asset_keys:
+		elements.append(StoryFlowVariant.from_string(key))
+	_apply_array_variable(variable_name, elements)
+
+
+## Write a character array variable by display name. Each entry is a character
+## path. See [method set_bool_array_variable] for the shared rules.
+func set_character_array_variable(variable_name: String, character_paths: Array[String]) -> void:
+	var elements: Array = []
+	for path in character_paths:
+		elements.append(StoryFlowVariant.from_string(path))
+	_apply_array_variable(variable_name, elements)
+
+
+## Shared tail of the set_*_array_variable family: find the variable, replace
+## its value with an array variant, and notify (which also live-refreshes the
+## current dialogue, like every variable change).
+func _apply_array_variable(variable_name: String, elements: Array) -> void:
+	var result := _find_variable_by_display_name(variable_name)
+	if result.is_empty():
+		return
+	_set_variable_from_result(result, StoryFlowVariant.from_array(elements))
+
+
 ## Read any map variable by display name.
 ##
 ## Returns a Dictionary of key -> StoryFlowVariant value, in insertion order.
