@@ -32,6 +32,7 @@ enum NodeType {
 	MINUS,
 	MULTIPLY,
 	DIVIDE,
+	MODULO,
 	RANDOM,
 
 	# Integer Comparison
@@ -48,6 +49,7 @@ enum NodeType {
 	MINUS_FLOAT,
 	MULTIPLY_FLOAT,
 	DIVIDE_FLOAT,
+	MODULO_FLOAT,
 	RANDOM_FLOAT,
 
 	# Float Comparison
@@ -273,6 +275,7 @@ static var _node_type_map: Dictionary = {
 	"minus": NodeType.MINUS,
 	"multiply": NodeType.MULTIPLY,
 	"divide": NodeType.DIVIDE,
+	"modulo": NodeType.MODULO,
 	"random": NodeType.RANDOM,
 
 	# Integer Comparison
@@ -289,6 +292,7 @@ static var _node_type_map: Dictionary = {
 	"minusFloat": NodeType.MINUS_FLOAT,
 	"multiplyFloat": NodeType.MULTIPLY_FLOAT,
 	"divideFloat": NodeType.DIVIDE_FLOAT,
+	"moduloFloat": NodeType.MODULO_FLOAT,
 	"randomFloat": NodeType.RANDOM_FLOAT,
 
 	# Float Comparison
@@ -531,12 +535,13 @@ static var _logic_node_types: Array[NodeType] = [
 	# Boolean logic
 	NodeType.AND_BOOL, NodeType.OR_BOOL, NodeType.NOT_BOOL, NodeType.EQUAL_BOOL,
 	# Integer arithmetic & comparison
-	NodeType.PLUS, NodeType.MINUS, NodeType.MULTIPLY, NodeType.DIVIDE, NodeType.RANDOM,
+	NodeType.PLUS, NodeType.MINUS, NodeType.MULTIPLY, NodeType.DIVIDE,
+	NodeType.MODULO, NodeType.RANDOM,
 	NodeType.GREATER_THAN, NodeType.GREATER_THAN_OR_EQUAL,
 	NodeType.LESS_THAN, NodeType.LESS_THAN_OR_EQUAL, NodeType.EQUAL_INT,
 	# Float arithmetic & comparison
 	NodeType.PLUS_FLOAT, NodeType.MINUS_FLOAT, NodeType.MULTIPLY_FLOAT,
-	NodeType.DIVIDE_FLOAT, NodeType.RANDOM_FLOAT,
+	NodeType.DIVIDE_FLOAT, NodeType.MODULO_FLOAT, NodeType.RANDOM_FLOAT,
 	NodeType.GREATER_THAN_FLOAT, NodeType.GREATER_THAN_OR_EQUAL_FLOAT,
 	NodeType.LESS_THAN_FLOAT, NodeType.LESS_THAN_OR_EQUAL_FLOAT, NodeType.EQUAL_FLOAT,
 	# String operations

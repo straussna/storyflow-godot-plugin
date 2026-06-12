@@ -380,6 +380,11 @@ func evaluate_integer_from_node(node_id: String, source_handle: String = "") -> 
 			var input2 := evaluate_integer_input(node_id, StoryFlowHandles.IN_INTEGER2, _get_data_int(data, "value2", 1))
 			result = (input1 / input2) if input2 != 0 else 0
 
+		StoryFlowTypes.NodeType.MODULO:
+			var input1 := evaluate_integer_input(node_id, StoryFlowHandles.IN_INTEGER1, _get_data_int(data, "value1", 0))
+			var input2 := evaluate_integer_input(node_id, StoryFlowHandles.IN_INTEGER2, _get_data_int(data, "value2", 0))
+			result = (input1 % input2) if input2 != 0 else 0
+
 		StoryFlowTypes.NodeType.RANDOM:
 			var min_val := evaluate_integer_input(node_id, StoryFlowHandles.IN_INTEGER1, _get_data_int(data, "value1", 0))
 			var max_val := evaluate_integer_input(node_id, StoryFlowHandles.IN_INTEGER2, _get_data_int(data, "value2", 100))
@@ -638,6 +643,11 @@ func evaluate_float_from_node(node_id: String, source_handle: String = "") -> fl
 			var input1 := evaluate_float_input(node_id, StoryFlowHandles.IN_FLOAT1, _get_data_float(data, "value1", 0.0))
 			var input2 := evaluate_float_input(node_id, StoryFlowHandles.IN_FLOAT2, _get_data_float(data, "value2", 1.0))
 			result = (input1 / input2) if not is_zero_approx(input2) else 0.0
+
+		StoryFlowTypes.NodeType.MODULO_FLOAT:
+			var input1 := evaluate_float_input(node_id, StoryFlowHandles.IN_FLOAT1, _get_data_float(data, "value1", 0.0))
+			var input2 := evaluate_float_input(node_id, StoryFlowHandles.IN_FLOAT2, _get_data_float(data, "value2", 0.0))
+			result = fmod(input1, input2) if not is_zero_approx(input2) else 0.0
 
 		StoryFlowTypes.NodeType.RANDOM_FLOAT:
 			var min_val := evaluate_float_input(node_id, StoryFlowHandles.IN_FLOAT1, _get_data_float(data, "value1", 0.0))
@@ -1813,6 +1823,10 @@ func _get_data_float(data: Dictionary, key: String, fallback: float = 0.0) -> fl
 	if val is int:
 		return float(val)
 	if val is StoryFlowVariant:
+		# Whole numbers in editor JSON import as INTEGER variants (no type
+		# hint on inline node values) — coerce like the raw-int branch above.
+		if val.type == StoryFlowTypes.VariableType.INTEGER:
+			return float(val.get_int())
 		return val.get_float(fallback)
 	return fallback
 

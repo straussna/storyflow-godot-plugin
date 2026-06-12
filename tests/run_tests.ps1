@@ -23,4 +23,6 @@ $failed = 0
 if ($LASTEXITCODE -ne 0) { $failed = 1 }
 & $GodotExe --headless --path $repoRoot --script res://tests/test_array_variable_setters.gd
 if ($LASTEXITCODE -ne 0) { $failed = 1 }
+& $GodotExe --headless --path $repoRoot --script res://tests/test_modulo_nodes.gd
+if ($LASTEXITCODE -ne 0) { $failed = 1 }
 exit $failed
