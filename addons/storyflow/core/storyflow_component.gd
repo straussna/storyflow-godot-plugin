@@ -750,6 +750,257 @@ func get_map_variable(variable_name: String) -> Dictionary:
 		out[key] = copy
 	return out
 
+
+# =============================================================================
+# Typed Map Variable Access (by display name)
+# =============================================================================
+# Game-facing typed get/set for map variables, following the set_*_array_variable
+# family above. The full key-type x value-type matrix collapses to NATIVE Godot
+# types: enum keys are strings and string/enum/image/audio/character values are
+# strings, leaving 2 key families (String, int) x 4 value families
+# (bool, int, float, String) = 8 get/set signatures.
+#
+# Rules:
+#   - KEYS are returned RAW — never routed through the string table. The
+#     runtime-wide map rule is "values localize, keys are identifiers".
+#   - String and enum VALUES resolve through the string table, like
+#     get_array_variable / get_map_variable elements.
+#   - Image / audio / character VALUES pass through RAW (asset keys / paths).
+#   - Getters unwrap StoryFlowVariant to native values and return a COPY of the
+#     map (map variables can share storage via setMap aliasing). Setters wrap
+#     native values back into StoryFlowVariant and reuse _notify_variable_changed
+#     so a live dialogue re-renders.
+#   - A missing / non-map / wrong-key-family / wrong-value-family variable
+#     pushes a warning and yields an empty Dictionary (getters) or a no-op
+#     (setters), like the array helpers.
+#
+# No separate get_map_keys_in_order helper is needed: Dictionary.keys() is
+# already in insertion order, which is the contractual map ordering, so the
+# typed getters' keys() carry it directly.
+
+# String-keyed map signatures accept STRING or ENUM key types (enum keys are
+# stored as String). Int-keyed signatures accept INTEGER. The value family
+# arrays say which variant types a signature accepts and returns natively.
+const _MAP_KEY_FAMILY_STRING: Array = [
+	StoryFlowTypes.VariableType.STRING, StoryFlowTypes.VariableType.ENUM,
+]
+const _MAP_KEY_FAMILY_INT: Array = [StoryFlowTypes.VariableType.INTEGER]
+const _MAP_VALUE_FAMILY_BOOL: Array = [StoryFlowTypes.VariableType.BOOLEAN]
+const _MAP_VALUE_FAMILY_INT: Array = [StoryFlowTypes.VariableType.INTEGER]
+const _MAP_VALUE_FAMILY_FLOAT: Array = [StoryFlowTypes.VariableType.FLOAT]
+# string/enum/image/audio/character all serialize to String storage
+const _MAP_VALUE_FAMILY_STRING: Array = [
+	StoryFlowTypes.VariableType.STRING, StoryFlowTypes.VariableType.ENUM,
+	StoryFlowTypes.VariableType.IMAGE, StoryFlowTypes.VariableType.AUDIO,
+	StoryFlowTypes.VariableType.CHARACTER,
+]
+
+
+## Read a String-keyed, boolean-valued map. See the section header for rules.
+func get_string_to_bool_map(variable_name: String, is_global: bool = false) -> Dictionary:
+	return _get_native_map(variable_name, is_global, _MAP_KEY_FAMILY_STRING, _MAP_VALUE_FAMILY_BOOL)
+
+
+## Read a String-keyed, integer-valued map.
+func get_string_to_int_map(variable_name: String, is_global: bool = false) -> Dictionary:
+	return _get_native_map(variable_name, is_global, _MAP_KEY_FAMILY_STRING, _MAP_VALUE_FAMILY_INT)
+
+
+## Read a String-keyed, float-valued map.
+func get_string_to_float_map(variable_name: String, is_global: bool = false) -> Dictionary:
+	return _get_native_map(variable_name, is_global, _MAP_KEY_FAMILY_STRING, _MAP_VALUE_FAMILY_FLOAT)
+
+
+## Read a String-keyed, String-valued map. Covers string, enum, image, audio,
+## and character value types; string/enum values are localized, asset values
+## are returned raw.
+func get_string_to_string_map(variable_name: String, is_global: bool = false) -> Dictionary:
+	return _get_native_map(variable_name, is_global, _MAP_KEY_FAMILY_STRING, _MAP_VALUE_FAMILY_STRING)
+
+
+## Read an int-keyed, boolean-valued map.
+func get_int_to_bool_map(variable_name: String, is_global: bool = false) -> Dictionary:
+	return _get_native_map(variable_name, is_global, _MAP_KEY_FAMILY_INT, _MAP_VALUE_FAMILY_BOOL)
+
+
+## Read an int-keyed, integer-valued map.
+func get_int_to_int_map(variable_name: String, is_global: bool = false) -> Dictionary:
+	return _get_native_map(variable_name, is_global, _MAP_KEY_FAMILY_INT, _MAP_VALUE_FAMILY_INT)
+
+
+## Read an int-keyed, float-valued map.
+func get_int_to_float_map(variable_name: String, is_global: bool = false) -> Dictionary:
+	return _get_native_map(variable_name, is_global, _MAP_KEY_FAMILY_INT, _MAP_VALUE_FAMILY_FLOAT)
+
+
+## Read an int-keyed, String-valued map (string/enum/image/audio/character).
+func get_int_to_string_map(variable_name: String, is_global: bool = false) -> Dictionary:
+	return _get_native_map(variable_name, is_global, _MAP_KEY_FAMILY_INT, _MAP_VALUE_FAMILY_STRING)
+
+
+## Write a String-keyed, boolean-valued map. Replaces all entries and notifies
+## (live-refreshing any active dialogue), like the array setters.
+func set_string_to_bool_map(variable_name: String, values: Dictionary, is_global: bool = false) -> void:
+	_apply_map_variable(variable_name, values, is_global, _MAP_KEY_FAMILY_STRING, _MAP_VALUE_FAMILY_BOOL)
+
+
+## Write a String-keyed, integer-valued map.
+func set_string_to_int_map(variable_name: String, values: Dictionary, is_global: bool = false) -> void:
+	_apply_map_variable(variable_name, values, is_global, _MAP_KEY_FAMILY_STRING, _MAP_VALUE_FAMILY_INT)
+
+
+## Write a String-keyed, float-valued map.
+func set_string_to_float_map(variable_name: String, values: Dictionary, is_global: bool = false) -> void:
+	_apply_map_variable(variable_name, values, is_global, _MAP_KEY_FAMILY_STRING, _MAP_VALUE_FAMILY_FLOAT)
+
+
+## Write a String-keyed, String-valued map. Values are stored verbatim as the
+## variable's declared value type (string/enum/image/audio/character); strings
+## bypass localization (no string-table key is created), matching the array
+## setters.
+func set_string_to_string_map(variable_name: String, values: Dictionary, is_global: bool = false) -> void:
+	_apply_map_variable(variable_name, values, is_global, _MAP_KEY_FAMILY_STRING, _MAP_VALUE_FAMILY_STRING)
+
+
+## Write an int-keyed, boolean-valued map.
+func set_int_to_bool_map(variable_name: String, values: Dictionary, is_global: bool = false) -> void:
+	_apply_map_variable(variable_name, values, is_global, _MAP_KEY_FAMILY_INT, _MAP_VALUE_FAMILY_BOOL)
+
+
+## Write an int-keyed, integer-valued map.
+func set_int_to_int_map(variable_name: String, values: Dictionary, is_global: bool = false) -> void:
+	_apply_map_variable(variable_name, values, is_global, _MAP_KEY_FAMILY_INT, _MAP_VALUE_FAMILY_INT)
+
+
+## Write an int-keyed, float-valued map.
+func set_int_to_float_map(variable_name: String, values: Dictionary, is_global: bool = false) -> void:
+	_apply_map_variable(variable_name, values, is_global, _MAP_KEY_FAMILY_INT, _MAP_VALUE_FAMILY_FLOAT)
+
+
+## Write an int-keyed, String-valued map (string/enum/image/audio/character).
+func set_int_to_string_map(variable_name: String, values: Dictionary, is_global: bool = false) -> void:
+	_apply_map_variable(variable_name, values, is_global, _MAP_KEY_FAMILY_INT, _MAP_VALUE_FAMILY_STRING)
+
+
+# -----------------------------------------------------------------------------
+# Typed map helpers (shared by the 16 functions above)
+# -----------------------------------------------------------------------------
+
+## Shared body of the typed map getters: find + validate the variable against
+## the expected key/value families, then unwrap each entry to a native value
+## (string/enum values localized, everything else raw). Returns a COPY; an
+## invalid variable yields an empty Dictionary (warning already pushed).
+func _get_native_map(variable_name: String, is_global: bool, key_family: Array, value_family: Array) -> Dictionary:
+	var out := {}
+	var result := _find_map_variable_for_access(variable_name, is_global, key_family, value_family)
+	if result.is_empty():
+		return out
+	var v: Dictionary = result["variable"]
+	var val = v.get("value", null)
+	if not (val is StoryFlowVariant):
+		return out
+	var map: Dictionary = val.get_map()
+	for key in map:
+		var entry = map[key]
+		if not (entry is StoryFlowVariant):
+			continue
+		out[key] = _unwrap_map_value(entry)
+	return out
+
+
+## Unwrap a value variant to a native GDScript value. String and enum values
+## route through the string table (localized like get_map_variable); image,
+## audio, and character values are returned raw; bool/int/float pass through.
+func _unwrap_map_value(entry: StoryFlowVariant):
+	match entry.type:
+		StoryFlowTypes.VariableType.BOOLEAN:
+			return entry.get_bool()
+		StoryFlowTypes.VariableType.INTEGER:
+			return entry.get_int()
+		StoryFlowTypes.VariableType.FLOAT:
+			return entry.get_float()
+		StoryFlowTypes.VariableType.STRING, StoryFlowTypes.VariableType.ENUM:
+			return _resolve_string(entry.get_string(""))
+		_:
+			# image / audio / character store an asset key / path as a String;
+			# return it untouched (no localization).
+			return entry.get_string("")
+
+
+## Shared tail of the typed map setters: find + validate, wrap each native value
+## into a StoryFlowVariant typed per the variable's declared value type, then
+## set + notify (live-refreshing the current dialogue). A wrong/missing variable
+## is a no-op (warning already pushed).
+func _apply_map_variable(variable_name: String, values: Dictionary, is_global: bool, key_family: Array, value_family: Array) -> void:
+	var result := _find_map_variable_for_access(variable_name, is_global, key_family, value_family)
+	if result.is_empty():
+		return
+	var v: Dictionary = result["variable"]
+	var value_type: int = v.get("value_type", StoryFlowTypes.VariableType.NONE)
+	var entries := {}
+	for key in values:
+		entries[key] = _wrap_map_value(values[key], value_type)
+	_set_variable_from_result(result, StoryFlowVariant.from_map(entries))
+
+
+## Wrap a native value into a StoryFlowVariant typed as the variable's declared
+## value type, so the stored entry round-trips and interpolates correctly. The
+## inverse of _unwrap_map_value: image/audio/character are stored as plain
+## String variants, matching how the importer holds them.
+func _wrap_map_value(value, value_type: int) -> StoryFlowVariant:
+	match value_type:
+		StoryFlowTypes.VariableType.BOOLEAN:
+			return StoryFlowVariant.from_bool(value)
+		StoryFlowTypes.VariableType.INTEGER:
+			return StoryFlowVariant.from_int(value)
+		StoryFlowTypes.VariableType.FLOAT:
+			return StoryFlowVariant.from_float(value)
+		StoryFlowTypes.VariableType.ENUM:
+			return StoryFlowVariant.from_enum(str(value))
+		_:
+			# string / image / audio / character all serialize to a String variant
+			return StoryFlowVariant.from_string(str(value))
+
+
+## Find a map variable for the typed accessors and validate its shape: scope the
+## lookup by is_global, require the variable to exist, be a MAP, and have a
+## key_type/value_type in the requested native families. Pushes a warning and
+## returns {} on any mismatch; otherwise returns the _find_variable_by_display_name
+## result dict.
+func _find_map_variable_for_access(variable_name: String, is_global: bool, key_family: Array, value_family: Array) -> Dictionary:
+	var result := _find_map_scoped(variable_name, is_global)
+	if result.is_empty():
+		return {}
+	var v: Dictionary = result["variable"]
+	if v.get("type", -1) != StoryFlowTypes.VariableType.MAP:
+		push_warning("StoryFlow: Variable '%s' is not a map" % variable_name)
+		return {}
+	if not key_family.has(v.get("key_type", StoryFlowTypes.VariableType.NONE)):
+		push_warning("StoryFlow: Map variable '%s' has a different key type than requested" % variable_name)
+		return {}
+	if not value_family.has(v.get("value_type", StoryFlowTypes.VariableType.NONE)):
+		push_warning("StoryFlow: Map variable '%s' has a different value type than requested" % variable_name)
+		return {}
+	return result
+
+
+## Resolve a variable by display name, honoring the is_global selector. When
+## is_global is true the lookup is restricted to globals; otherwise it uses the
+## default locals-then-globals scoping of _find_variable_by_display_name.
+func _find_map_scoped(variable_name: String, is_global: bool) -> Dictionary:
+	if not is_global:
+		return _find_variable_by_display_name(variable_name)
+	var mgr := get_manager()
+	if mgr:
+		var globals: Dictionary = mgr.get_global_variables()
+		for var_id in globals:
+			var v: Dictionary = globals[var_id]
+			if v.get("name", "") == variable_name:
+				return {"id": var_id, "variable": v, "is_global": true}
+	push_warning("StoryFlow: Global variable '%s' not found" % variable_name)
+	return {}
+
+
 # =============================================================================
 # Utility Functions
 # =============================================================================
