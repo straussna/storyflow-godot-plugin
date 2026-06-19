@@ -23,6 +23,9 @@ extends Node
 ## Optional dialogue UI scene; auto-instantiated when dialogue starts, freed when it ends.
 @export var dialogue_ui_scene: PackedScene = null
 
+## Optional parent for the dialogue UI; overrides type-based routing when set.
+@export_node_path("Node") var dialogue_ui_parent: NodePath = NodePath()
+
 @export_group("Debug")
 
 ## Enable execution trace logging for cross-runtime comparison.
@@ -63,7 +66,7 @@ var _context: StoryFlowExecutionContext = null
 var _evaluator: StoryFlowEvaluator = null
 var _text: StoryFlowTextInterpolator = null
 var _audio: StoryFlowAudioController = null
-var _dialogue_ui_instance: Control = null
+var _dialogue_ui_instance: Node = null
 var _is_processing_chain: bool = false
 var _dialogue_dirty: bool = false
 var _waiting_for_audio_advance: bool = false
@@ -165,12 +168,15 @@ func start_dialogue_with_script(path: String) -> void:
 		if _dialogue_ui_instance:
 			_dialogue_ui_instance.queue_free()
 			_dialogue_ui_instance = null
-		_dialogue_ui_instance = ui_scene.instantiate() as Control
-		if _dialogue_ui_instance:
-			# Try to connect it if it has an initialize method
-			if _dialogue_ui_instance.has_method("initialize_with_component"):
-				_dialogue_ui_instance.call("initialize_with_component", self)
-			add_child(_dialogue_ui_instance)
+		var ui_root: Node = ui_scene.instantiate()
+		if ui_root:
+			if ui_root.has_method("initialize_with_component"):
+				ui_root.call("initialize_with_component", self)
+			_dialogue_ui_instance = ui_root
+			var ui_parent: Node = _resolve_dialogue_ui_parent(ui_root)
+			ui_parent.add_child(ui_root)
+		else:
+			push_warning("StoryFlow: failed to instantiate dialogue UI scene for '%s'" % path)
 
 	# Broadcast start events
 	dialogue_started.emit()
@@ -182,6 +188,40 @@ func start_dialogue_with_script(path: String) -> void:
 		_process_node(start_node)
 	else:
 		_report_error("Start node (id=0) not found in script")
+
+
+## Resolve the node the dialogue UI attaches under, routed by the UI root's type.
+## Worldspace UIs parent to the component's CanvasItem/Node3D parent (a sibling
+## of the entity's visuals) so they inherit the entity transform.
+func _resolve_dialogue_ui_parent(ui_root: Node) -> Node:
+	# Explicit override wins when it resolves to a valid node.
+	if not dialogue_ui_parent.is_empty():
+		var override := get_node_or_null(dialogue_ui_parent)
+		if override:
+			return override
+		push_warning("StoryFlow: dialogue_ui_parent '%s' did not resolve; falling back to type-based routing" % dialogue_ui_parent)
+
+	# Control UIs render in screen space; keep today's behavior (child of self).
+	if ui_root is Control:
+		return self
+
+	var parent := get_parent()
+
+	# 2D worldspace UI: sibling of the entity's CanvasItem visuals.
+	if ui_root is Node2D:
+		if parent is CanvasItem:
+			return parent
+		push_warning("StoryFlow: Node2D dialogue UI has no CanvasItem parent; it will not follow the entity transform")
+		return self
+
+	# 3D worldspace UI: sibling under the entity's Node3D.
+	if ui_root is Node3D:
+		if parent is Node3D:
+			return parent
+		push_warning("StoryFlow: Node3D dialogue UI has no Node3D parent; it will not follow the entity transform")
+		return self
+
+	return self
 
 
 ## Select a dialogue option by ID.
