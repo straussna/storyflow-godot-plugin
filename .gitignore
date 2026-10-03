@@ -26,3 +26,4 @@ Desktop.ini
 
 # StoryFlow plugin local settings
 addons/storyflow/.storyflow_settings.cfg
+/.agents/
