@@ -169,7 +169,9 @@ func import_project(build_dir: String, output_dir: String) -> StoryFlowProject:
 					character.resolved_assets[character.image_key] = project.resolved_assets[character.image_key]
 
 				project.characters[normalized_path] = character
-				print("StoryFlow: Imported character '%s'" % char_path)
+				# PATCH (Gloomsday): per-character import log removed — it prints a line per
+				# character on every single project load, drowning the game's own output.
+				# Re-apply after any StoryFlow addon upgrade — see Dialogues/CLAUDE.md > Addon Modifications.
 
 	# ------------------------------------------------------------------
 	# Character index (character-index.json, P4)
@@ -318,7 +320,9 @@ func import_project(build_dir: String, output_dir: String) -> StoryFlowProject:
 		if write_import_meta(output_dir, meta) != OK:
 			_error_count += 1
 
-	print("StoryFlow: Successfully imported project with %d scripts" % project.scripts.size())
+	# PATCH (Gloomsday): import summary log removed — Dialogues/StoryFlowWrapper reports the
+	# loaded project itself, so this only duplicated it a line earlier.
+	# Re-apply after any StoryFlow addon upgrade — see Dialogues/CLAUDE.md > Addon Modifications.
 	return project
 
 
@@ -479,7 +483,8 @@ func import_project_from_json(project_json: Dictionary) -> StoryFlowProject:
 				script.script_path = script_path
 				project.scripts[script_path] = script
 
-	print("StoryFlow: Imported project from sync data with %d scripts" % project.scripts.size())
+	# PATCH (Gloomsday): sync-import summary log removed.
+	# Re-apply after any StoryFlow addon upgrade — see Dialogues/CLAUDE.md > Addon Modifications.
 	return project
 
 
@@ -610,7 +615,8 @@ static func write_import_meta(output_dir: String, meta: Dictionary) -> Error:
 		DirAccess.remove_absolute(temp_path)
 		return rename_err
 
-	print("StoryFlow: Saved import metadata to %s" % meta_path)
+	# PATCH (Gloomsday): metadata-save log removed.
+	# Re-apply after any StoryFlow addon upgrade — see Dialogues/CLAUDE.md > Addon Modifications.
 	return OK
 
 
@@ -1585,7 +1591,9 @@ func _import_media_assets(
 			out_resolved[asset_id] = target_path
 			push_warning("StoryFlow: Could not load resource %s" % target_path)
 
-		print("StoryFlow: Imported media %s -> %s" % [asset_path, target_path])
+		# PATCH (Gloomsday): per-asset import log removed — one line per imported image on every
+		# project load. The push_warning above still reports an asset that fails to load.
+		# Re-apply after any StoryFlow addon upgrade — see Dialogues/CLAUDE.md > Addon Modifications.
 
 
 ## Load a media file through Godot's import remap. In exported games the raw
@@ -1764,8 +1772,8 @@ func _copy_file(src_path: String, dst_path: String, log_label: String = "") -> E
 		_error_count += 1
 		return err
 
-	if not log_label.is_empty():
-		print("StoryFlow: Copied %s" % log_label)
+	# PATCH (Gloomsday): per-file copy log removed — one line per copied asset.
+	# Re-apply after any StoryFlow addon upgrade — see Dialogues/CLAUDE.md > Addon Modifications.
 	return OK
 
 

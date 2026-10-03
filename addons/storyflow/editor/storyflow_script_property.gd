@@ -3,7 +3,9 @@ extends EditorProperty
 ## Custom inspector property for StoryFlowComponent.script_path.
 ## Shows a text field with a dropdown button listing all imported scripts.
 
-const META_PATH := "res://storyflow/storyflow_import_meta.json"
+# PATCH (Gloomsday): meta relocated out of the deleted res://storyflow/ into the build folder.
+# Re-apply after any StoryFlow addon upgrade — see Dialogues/CLAUDE.md > Addon Modifications.
+const META_PATH := "res://Dialogues/StoryFlowBuild/storyflow_import_meta.json"
 
 var _line_edit: LineEdit
 var _menu_button: MenuButton

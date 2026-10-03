@@ -292,7 +292,8 @@ func _set_project_on_manager(project: StoryFlowProject) -> void:
 	var mgr := tree.root.get_node_or_null("/root/StoryFlowRuntime")
 	if mgr and mgr.has_method("set_project"):
 		mgr.set_project(project)
-		print("[StoryFlow] Project set on manager: %s" % project.title)
+		# PATCH (Gloomsday): editor-dock log removed.
+		# Re-apply after any StoryFlow addon upgrade — see Dialogues/CLAUDE.md > Addon Modifications.
 
 
 ## Refresh the sync fields of the import metadata, preserving whatever the

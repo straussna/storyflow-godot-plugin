@@ -54,7 +54,11 @@ const StoryFlowVariant = preload("res://addons/storyflow/core/storyflow_variant.
 
 ## Enable execution trace logging for cross-runtime comparison.
 ## Output format: [SF-TRACE] <event type> <details>
-@export var trace_enabled: bool = true
+# PATCH (Gloomsday): trace_enabled defaults to false — stock ships this on, and every
+# dialogue node/variable-set/branch prints an "[SF-TRACE] ..." line to console, drowning
+# the game's own output. Re-apply after any StoryFlow addon upgrade — see
+# Dialogues/CLAUDE.md > Addon Modifications.
+@export var trace_enabled: bool = false
 
 @export_group("Audio")
 

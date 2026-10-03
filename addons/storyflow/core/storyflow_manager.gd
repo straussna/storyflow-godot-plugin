@@ -38,7 +38,9 @@ signal language_changed(language_code: String)
 # Project
 # =============================================================================
 
-const DEFAULT_IMPORT_META_PATH := "res://storyflow/storyflow_import_meta.json"
+# PATCH (Gloomsday): meta relocated out of the deleted res://storyflow/ into the build folder.
+# Re-apply after any StoryFlow addon upgrade — see Dialogues/CLAUDE.md > Addon Modifications.
+const DEFAULT_IMPORT_META_PATH := "res://Dialogues/StoryFlowBuild/storyflow_import_meta.json"
 
 var _project: StoryFlowProject = null
 var _global_variables: Dictionary = {}
@@ -106,17 +108,20 @@ func _auto_load_project() -> void:
 		push_warning("[StoryFlow] Failed to parse import metadata")
 		return
 
-	var meta: Dictionary = json.data
-	var output_dir: String = meta.get("output_dir", "")
-	if output_dir.is_empty():
-		output_dir = DEFAULT_IMPORT_META_PATH.get_base_dir()
+	# PATCH (Gloomsday): resolve the build dir from the meta's own res:// location, not the stored
+	# output_dir. The external StoryFlow editor regenerates the meta with a CWD-relative output_dir
+	# (no res:// prefix) that resolves outside the PCK in an exported build — dialogue then silently
+	# never loads. The build always sits next to the meta, so its base dir is authoritative.
+	# Re-apply after any StoryFlow addon upgrade — see Dialogues/CLAUDE.md > Addon Modifications.
+	var output_dir := DEFAULT_IMPORT_META_PATH.get_base_dir()
 
 	# Load from the local copy inside the project (output_dir IS the build dir now)
 	var importer := StoryFlowImporter.new()
 	var project := importer.load_project_local(output_dir)
 	if project:
 		set_project(project)
-		print("[StoryFlow] Project loaded: %s (%d scripts)" % [project.title, project.scripts.size()])
+		# PATCH (Gloomsday): project-loaded log removed — one line on every session start.
+		# Re-apply after any StoryFlow addon upgrade — see Dialogues/CLAUDE.md > Addon Modifications.
 
 
 # =============================================================================
@@ -502,8 +507,18 @@ func load_from_slot(slot_name: String) -> bool:
 	# Global variables: values only, onto the records already there.
 	var saved_globals: Dictionary = data.get("global_variables", {})
 	for var_id in saved_globals:
-		if _global_variables.has(var_id):
-			_global_variables[var_id]["value"] = saved_globals[var_id].get("value", null)
+		if not _global_variables.has(var_id):
+			continue
+		var saved_entry: Dictionary = saved_globals[var_id]
+		var live_entry: Dictionary = _global_variables[var_id]
+		# PATCH (Gloomsday): a saved value whose type or array-ness no longer matches the
+		# declaration keeps the build's default.
+		# Re-apply after any StoryFlow addon upgrade — see Dialogues/CLAUDE.md > Addon Modifications.
+		if saved_entry.has("type") and int(saved_entry["type"]) != int(live_entry.get("type", -2)):
+			continue
+		if bool(saved_entry.get("is_array", false)) != bool(live_entry.get("is_array", false)):
+			continue
+		live_entry["value"] = saved_entry.get("value", null)
 
 	# Runtime characters: saved variable values merged into the existing characters, plus the
 	# display name and portrait when the document carries them (a legacy save does not, and

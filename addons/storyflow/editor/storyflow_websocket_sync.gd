@@ -133,7 +133,8 @@ func _handle_project_updated(data: Dictionary) -> void:
 	# Build directory is projectPath/build
 	var build_dir: String = project_path.replace("\\", "/") + "/build"
 
-	print("[StoryFlow] Syncing from build directory: %s" % build_dir)
+	# PATCH (Gloomsday): sync-start log removed.
+	# Re-apply after any StoryFlow addon upgrade — see Dialogues/CLAUDE.md > Addon Modifications.
 
 	var importer := StoryFlowImporter.new()
 	var project := importer.import_project(build_dir, _output_dir)
