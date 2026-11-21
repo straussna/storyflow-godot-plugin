@@ -506,19 +506,30 @@ func load_from_slot(slot_name: String) -> bool:
 
 	# Global variables: values only, onto the records already there.
 	var saved_globals: Dictionary = data.get("global_variables", {})
+	# PATCH (Gloomsday): merge saved global VALUES over a fresh copy of the build's defaults,
+	# rebuilt in place, rather than over whatever the session currently holds. A global the save
+	# predates is therefore present at its build default, a global dropped from the build stays
+	# gone, and a saved value whose type or array-ness no longer matches the declaration leaves
+	# the build's default in place. Only "value" is overlaid, so the build stays authoritative for
+	# name/type/enum_values.
+	# Re-apply after any StoryFlow addon upgrade — see Dialogues/CLAUDE.md > Addon Modifications.
+	if _project:
+		var defaults: Dictionary = StoryFlowVariant.deep_copy_variables(_project.global_variables)
+		_global_variables.clear()
+		for var_id in defaults:
+			_global_variables[var_id] = defaults[var_id]
 	for var_id in saved_globals:
 		if not _global_variables.has(var_id):
 			continue
 		var saved_entry: Dictionary = saved_globals[var_id]
+		if not saved_entry.has("value"):
+			continue
 		var live_entry: Dictionary = _global_variables[var_id]
-		# PATCH (Gloomsday): a saved value whose type or array-ness no longer matches the
-		# declaration keeps the build's default.
-		# Re-apply after any StoryFlow addon upgrade — see Dialogues/CLAUDE.md > Addon Modifications.
 		if saved_entry.has("type") and int(saved_entry["type"]) != int(live_entry.get("type", -2)):
 			continue
 		if bool(saved_entry.get("is_array", false)) != bool(live_entry.get("is_array", false)):
 			continue
-		live_entry["value"] = saved_entry.get("value", null)
+		live_entry["value"] = saved_entry["value"]
 
 	# Runtime characters: saved variable values merged into the existing characters, plus the
 	# display name and portrait when the document carries them (a legacy save does not, and

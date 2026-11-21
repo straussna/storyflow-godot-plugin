@@ -320,8 +320,7 @@ func import_project(build_dir: String, output_dir: String) -> StoryFlowProject:
 		if write_import_meta(output_dir, meta) != OK:
 			_error_count += 1
 
-	# PATCH (Gloomsday): import summary log removed — Dialogues/StoryFlowWrapper reports the
-	# loaded project itself, so this only duplicated it a line earlier.
+	# PATCH (Gloomsday): import summary log removed; the importer prints no routine console lines.
 	# Re-apply after any StoryFlow addon upgrade — see Dialogues/CLAUDE.md > Addon Modifications.
 	return project
 
